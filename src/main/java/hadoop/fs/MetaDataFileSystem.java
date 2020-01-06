@@ -40,6 +40,8 @@ import com.google.common.collect.ImmutableList.Builder;
 public class MetaDataFileSystem extends FileSystem {
 
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+  private static final String DATA_KEYTAB_SUFFIX = ".data.keytab";
+  private static final String DATA_PRINCIPAL_SUFFIX = ".data.principal";
   private static final String IO_FILE_BUFFER_SIZE = "io.file.buffer.size";
   private static final String USER_HOME_DIR_PREFIX = "/user/";
   private static final String DATA_PATH_SUFFIX = ".data.path";
@@ -78,15 +80,21 @@ public class MetaDataFileSystem extends FileSystem {
                                .getScheme();
     _metaPathAuthority = _metaPath.toUri()
                                   .getAuthority();
+
+    String principal = conf.get(getScheme() + DATA_PRINCIPAL_SUFFIX);
+    if (principal != null) {
+      String keytab = conf.get(getScheme() + DATA_KEYTAB_SUFFIX);
+      _dataUgi = UserGroupInformation.loginUserFromKeytabAndReturnUGI(principal, keytab);
+    }
   }
 
   /**
    * Gets data entry for given meta path;
    */
-  protected MetaDataEntry getDataEntry(Path metaPath) throws IOException {
+  protected DataEntry getDataEntry(Path metaPath) throws IOException {
     FileSystem metaFs = metaPath.getFileSystem(getConf());
     try (FSDataInputStream input = metaFs.open(metaPath)) {
-      return OBJECT_MAPPER.readValue(input, MetaDataEntry.class);
+      return OBJECT_MAPPER.readValue(input, DataEntry.class);
     }
   }
 
@@ -104,7 +112,7 @@ public class MetaDataFileSystem extends FileSystem {
   /**
    * remote://auth/dir1/test1 => hdfs://something/meta/dir1/test1
    */
-  protected Path getMetaPath(Path virtualPath) throws IOException {
+  protected MetaEntry getMetaEntry(Path virtualPath) throws IOException {
     virtualPath = makeQualifiedPath(virtualPath);
     URI virtualUri = virtualPath.toUri();
     if (!virtualUri.getScheme()
@@ -117,21 +125,23 @@ public class MetaDataFileSystem extends FileSystem {
           "Wrong authority for path " + virtualPath + " should be authority " + _fsUri.getAuthority());
     }
     String fullVirtualPath = virtualUri.getPath();
-
     List<String> fullVirtualPathParts = split(fullVirtualPath);
     Builder<String> builder = ImmutableList.builder();
     ImmutableList<String> list = builder.addAll(_rootMetaPathParts)
                                         .addAll(fullVirtualPathParts.subList(1, fullVirtualPathParts.size()))
                                         .build();
     String path = PATH_JOINER.join(list);
-    return new Path(_metaPathScheme, _metaPathAuthority, path);
+    Path metaPath = new Path(_metaPathScheme, _metaPathAuthority, path);
+    return MetaEntry.builder()
+                    .metaPath(metaPath)
+                    .build();
   }
 
   @Override
   public FSDataInputStream open(Path f, int bufferSize) throws IOException {
     try {
-      Path metaPath = getMetaPath(f);
-      MetaDataEntry dataEntry = getDataEntry(metaPath);
+      MetaEntry metaEntry = getMetaEntry(f);
+      DataEntry dataEntry = getDataEntry(metaEntry.getMetaPath());
       if (dataEntry.getWriteState() == WriteState.WRITING) {
         throw new IOException("File " + f + " open for writing.");
       }
@@ -148,7 +158,8 @@ public class MetaDataFileSystem extends FileSystem {
   public FSDataOutputStream create(Path f, FsPermission permission, boolean overwrite, int bufferSize,
       short replication, long blockSize, Progressable progress) throws IOException {
     try {
-      Path metaPath = getMetaPath(f);
+      MetaEntry metaEntry = getMetaEntry(f);
+      Path metaPath = metaEntry.getMetaPath();
       Path dataPath = createDataPath(metaPath);
       storeDataPath(metaPath, dataPath, permission, overwrite, WriteState.WRITING);
       Closeable trigger = () -> storeDataPath(metaPath, dataPath, permission, overwrite, WriteState.CLOSED);
@@ -167,12 +178,15 @@ public class MetaDataFileSystem extends FileSystem {
   @Override
   public boolean rename(Path src, Path dst) throws IOException {
     try {
-      Path metaSrcPath = getMetaPath(src);
-      Path metaDstPath = getMetaPath(dst);
+      MetaEntry metaSrcEntry = getMetaEntry(src);
+      Path metaSrcPath = metaSrcEntry.getMetaPath();
+      MetaEntry metaDstEntry = getMetaEntry(src);
+      Path metaDstPath = metaDstEntry.getMetaPath();
+
       FileSystem srcmetaFs = metaSrcPath.getFileSystem(getConf());
       FileSystem dstmetaFs = metaDstPath.getFileSystem(getConf());
       if (!srcmetaFs.getUri()
-                  .equals(dstmetaFs.getUri())) {
+                    .equals(dstmetaFs.getUri())) {
         return false;
       }
       return srcmetaFs.rename(metaSrcPath, metaDstPath);
@@ -185,7 +199,8 @@ public class MetaDataFileSystem extends FileSystem {
   @Override
   public boolean delete(Path f, boolean recursive) throws IOException {
     try {
-      Path metaPath = getMetaPath(f);
+      MetaEntry metaEntry = getMetaEntry(f);
+      Path metaPath = metaEntry.getMetaPath();
       FileSystem metaFs = metaPath.getFileSystem(getConf());
       if (recursive) {
         return deleteRecursive(metaFs.getFileStatus(metaPath));
@@ -201,7 +216,8 @@ public class MetaDataFileSystem extends FileSystem {
   @Override
   public FileStatus[] listStatus(Path f) throws FileNotFoundException, IOException {
     try {
-      Path metaPath = getMetaPath(f);
+      MetaEntry metaEntry = getMetaEntry(f);
+      Path metaPath = metaEntry.getMetaPath();
       FileSystem metaFs = metaPath.getFileSystem(getConf());
       FileStatus[] listStatus = metaFs.listStatus(metaPath);
       return fixFileStatusList(listStatus);
@@ -214,7 +230,8 @@ public class MetaDataFileSystem extends FileSystem {
   @Override
   public boolean mkdirs(Path f, FsPermission permission) throws IOException {
     try {
-      Path metaPath = getMetaPath(f);
+      MetaEntry metaEntry = getMetaEntry(f);
+      Path metaPath = metaEntry.getMetaPath();
       FileSystem metaFs = metaPath.getFileSystem(getConf());
       return metaFs.mkdirs(metaPath, permission);
     } catch (Throwable t) {
@@ -227,7 +244,8 @@ public class MetaDataFileSystem extends FileSystem {
   public FileStatus getFileStatus(Path f) throws IOException {
     boolean logError = true;
     try {
-      Path metaPath = getMetaPath(f);
+      MetaEntry metaEntry = getMetaEntry(f);
+      Path metaPath = metaEntry.getMetaPath();
       FileSystem metaFs = metaPath.getFileSystem(getConf());
       FileStatus fileStatus;
       try {
@@ -248,7 +266,8 @@ public class MetaDataFileSystem extends FileSystem {
   @Override
   public AclStatus getAclStatus(Path path) throws IOException {
     try {
-      Path metaPath = getMetaPath(path);
+      MetaEntry metaEntry = getMetaEntry(path);
+      Path metaPath = metaEntry.getMetaPath();
       FileSystem metaFs = metaPath.getFileSystem(getConf());
       return metaFs.getAclStatus(metaPath);
     } catch (Throwable t) {
@@ -260,7 +279,8 @@ public class MetaDataFileSystem extends FileSystem {
   @Override
   public void modifyAclEntries(Path path, List<AclEntry> aclSpec) throws IOException {
     try {
-      Path metaPath = getMetaPath(path);
+      MetaEntry metaEntry = getMetaEntry(path);
+      Path metaPath = metaEntry.getMetaPath();
       FileSystem metaFs = metaPath.getFileSystem(getConf());
       metaFs.modifyAclEntries(metaPath, aclSpec);
     } catch (Throwable t) {
@@ -272,7 +292,8 @@ public class MetaDataFileSystem extends FileSystem {
   @Override
   public void setXAttr(Path path, String name, byte[] value, EnumSet<XAttrSetFlag> flag) throws IOException {
     try {
-      Path metaPath = getMetaPath(path);
+      MetaEntry metaEntry = getMetaEntry(path);
+      Path metaPath = metaEntry.getMetaPath();
       if (isFileLinkXAttrName(name)) {
         createLink(metaPath, value);
       } else {
@@ -288,7 +309,8 @@ public class MetaDataFileSystem extends FileSystem {
   @Override
   public byte[] getXAttr(Path path, String name) throws IOException {
     try {
-      Path metaPath = getMetaPath(path);
+      MetaEntry metaEntry = getMetaEntry(path);
+      Path metaPath = metaEntry.getMetaPath();
       FileSystem metaFs = metaPath.getFileSystem(getConf());
       return metaFs.getXAttr(metaPath, name);
     } catch (Throwable t) {
@@ -300,7 +322,8 @@ public class MetaDataFileSystem extends FileSystem {
   @Override
   public Map<String, byte[]> getXAttrs(Path path) throws IOException {
     try {
-      Path metaPath = getMetaPath(path);
+      MetaEntry metaEntry = getMetaEntry(path);
+      Path metaPath = metaEntry.getMetaPath();
       FileSystem metaFs = metaPath.getFileSystem(getConf());
       return metaFs.getXAttrs(metaPath);
     } catch (Throwable t) {
@@ -312,7 +335,8 @@ public class MetaDataFileSystem extends FileSystem {
   @Override
   public Map<String, byte[]> getXAttrs(Path path, List<String> names) throws IOException {
     try {
-      Path metaPath = getMetaPath(path);
+      MetaEntry metaEntry = getMetaEntry(path);
+      Path metaPath = metaEntry.getMetaPath();
       FileSystem metaFs = metaPath.getFileSystem(getConf());
       return metaFs.getXAttrs(metaPath, names);
     } catch (Throwable t) {
@@ -324,7 +348,8 @@ public class MetaDataFileSystem extends FileSystem {
   @Override
   public List<String> listXAttrs(Path path) throws IOException {
     try {
-      Path metaPath = getMetaPath(path);
+      MetaEntry metaEntry = getMetaEntry(path);
+      Path metaPath = metaEntry.getMetaPath();
       FileSystem metaFs = metaPath.getFileSystem(getConf());
       return metaFs.listXAttrs(metaPath);
     } catch (Throwable t) {
@@ -336,7 +361,8 @@ public class MetaDataFileSystem extends FileSystem {
   @Override
   public void removeXAttr(Path path, String name) throws IOException {
     try {
-      Path metaPath = getMetaPath(path);
+      MetaEntry metaEntry = getMetaEntry(path);
+      Path metaPath = metaEntry.getMetaPath();
       FileSystem metaFs = metaPath.getFileSystem(getConf());
       metaFs.removeXAttr(metaPath, name);
     } catch (Throwable t) {
@@ -394,7 +420,7 @@ public class MetaDataFileSystem extends FileSystem {
   /**
    * Store the data path for the given meta path.
    */
-  protected void storeDataPath(FSDataOutputStream output, MetaDataEntry storageEntry) throws IOException {
+  protected void storeDataPath(FSDataOutputStream output, DataEntry storageEntry) throws IOException {
     OBJECT_MAPPER.writeValue(output, storageEntry);
   }
 
@@ -473,11 +499,11 @@ public class MetaDataFileSystem extends FileSystem {
     try (FSDataOutputStream output = metaFs.create(metaPath)) {
       String dataUri = dataPath.toUri()
                                .toString();
-      MetaDataEntry storageEntry = MetaDataEntry.builder()
-                                                          .dataPathUri(dataUri)
-                                                          .managed(false)
-                                                          .writeState(WriteState.CLOSED)
-                                                          .build();
+      DataEntry storageEntry = DataEntry.builder()
+                                        .dataPathUri(dataUri)
+                                        .managed(false)
+                                        .writeState(WriteState.CLOSED)
+                                        .build();
       storeDataPath(output, storageEntry);
     }
   }
@@ -519,7 +545,7 @@ public class MetaDataFileSystem extends FileSystem {
   }
 
   private boolean deleteFile(FileSystem metaFs, Path metaPath) throws IOException {
-    MetaDataEntry storageEntry = getDataEntry(metaPath);
+    DataEntry storageEntry = getDataEntry(metaPath);
     Path dataPath = storageEntry.getDataPath();
     FileSystem dataFs = dataPath.getFileSystem(getConf());
     boolean result = metaFs.delete(metaPath, false);
@@ -548,7 +574,7 @@ public class MetaDataFileSystem extends FileSystem {
       return null;
     }
     Path metaPath = metaFileStatus.getPath();
-    MetaDataEntry dataEntry = getDataEntry(metaPath);
+    DataEntry dataEntry = getDataEntry(metaPath);
     long length;
     WriteState writeState = dataEntry.getWriteState();
     if (writeState == WriteState.CLOSED) {
@@ -583,16 +609,16 @@ public class MetaDataFileSystem extends FileSystem {
     long metaBlockSize = metaFs.getDefaultBlockSize(dataPath);
 
     int bufferSize = metaFs.getConf()
-                         .getInt(IO_FILE_BUFFER_SIZE, 4096);
+                           .getInt(IO_FILE_BUFFER_SIZE, 4096);
     try (FSDataOutputStream output = metaFs.create(metaPath, permission, overwrite, bufferSize, metaReplication,
         metaBlockSize, null)) {
       String dataUri = dataPath.toUri()
                                .toString();
-      MetaDataEntry storageEntry = MetaDataEntry.builder()
-                                                          .dataPathUri(dataUri)
-                                                          .managed(true)
-                                                          .writeState(state)
-                                                          .build();
+      DataEntry storageEntry = DataEntry.builder()
+                                        .dataPathUri(dataUri)
+                                        .managed(true)
+                                        .writeState(state)
+                                        .build();
       storeDataPath(output, storageEntry);
     }
   }

@@ -60,26 +60,26 @@ public class MetaDataFileSystemPathRewriteTest {
 
   @Test
   public void testGetMetaPath1() throws Exception {
-    Path metaPath = _fileSystem.getMetaPath(new Path("metadata://test/test1"));
-    assertEquals(new Path("file:///meta/test1"), metaPath);
+    MetaEntry metaEntry = _fileSystem.getMetaEntry(new Path("metadata://test/test1"));
+    assertEquals(new Path("file:///meta/test1"), metaEntry.getMetaPath());
   }
 
   @Test
   public void testGetMetaPath2() throws Exception {
-    Path metaPath = _fileSystem.getMetaPath(new Path("metadata://test/test1/"));
-    assertEquals(new Path("file:///meta/test1/"), metaPath);
+    MetaEntry metaEntry = _fileSystem.getMetaEntry(new Path("metadata://test/test1/"));
+    assertEquals(new Path("file:///meta/test1/"), metaEntry.getMetaPath());
   }
 
   @Test
   public void testGetMetaPath3() throws Exception {
-    Path metaPath = _fileSystem.getMetaPath(new Path("metadata://test/test1/sub1"));
-    assertEquals(new Path("file:///meta/test1/sub1"), metaPath);
+    MetaEntry metaEntry = _fileSystem.getMetaEntry(new Path("metadata://test/test1/sub1"));
+    assertEquals(new Path("file:///meta/test1/sub1"), metaEntry.getMetaPath());
   }
 
   @Test
   public void testGetMetaPathError() throws Exception {
     try {
-      _fileSystem.getMetaPath(new Path("metadata://testerror/test1"));
+      _fileSystem.getMetaEntry(new Path("metadata://testerror/test1"));
       fail();
     } catch (IOException e) {
     }
