@@ -1,4 +1,4 @@
-package hadoop.fs;
+package hadoop.fs.metadata;
 
 import static org.junit.Assert.*;
 
@@ -11,7 +11,8 @@ import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
-import hadoop.fs.MetaDataFileSystem;
+import hadoop.fs.metadata.MetaDataFileSystem;
+import hadoop.fs.metadata.MetaEntry;
 
 public class MetaDataFileSystemPathRewriteTest {
 

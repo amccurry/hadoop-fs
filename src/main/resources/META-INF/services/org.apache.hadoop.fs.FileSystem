@@ -1,1 +1,1 @@
-hadoop.fs.MetaDataFileSystem
+hadoop.fs.metadata.MetaDataFileSystem

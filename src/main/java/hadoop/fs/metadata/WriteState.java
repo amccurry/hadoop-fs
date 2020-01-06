@@ -1,4 +1,4 @@
-package hadoop.fs;
+package hadoop.fs.metadata;
 
 public enum WriteState {
   

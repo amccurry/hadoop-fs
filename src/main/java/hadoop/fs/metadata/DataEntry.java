@@ -1,6 +1,8 @@
-package hadoop.fs;
+package hadoop.fs.metadata;
 
 import org.apache.hadoop.fs.Path;
+
+import com.fasterxml.jackson.annotation.JsonIgnore;
 
 import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
@@ -12,8 +14,17 @@ import lombok.Value;
 @NoArgsConstructor(force = true, access = AccessLevel.PRIVATE)
 @AllArgsConstructor
 @Builder(toBuilder = true)
-public class MetaEntry {
+public class DataEntry {
 
-  Path metaPath;
+  String dataPathUri;
+
+  boolean managed;
+
+  WriteState writeState;
+
+  @JsonIgnore
+  public Path getDataPath() {
+    return new Path(dataPathUri);
+  }
 
 }

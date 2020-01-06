@@ -1,4 +1,4 @@
-package hadoop.fs;
+package hadoop.fs.metadata;
 
 import java.io.Closeable;
 import java.io.FileNotFoundException;

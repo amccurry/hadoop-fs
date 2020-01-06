@@ -1,4 +1,4 @@
-package hadoop.fs;
+package hadoop.fs.metadata;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
