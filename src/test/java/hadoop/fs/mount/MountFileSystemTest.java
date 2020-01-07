@@ -3,8 +3,10 @@ package hadoop.fs.mount;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 import java.io.File;
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.util.UUID;
 
@@ -19,9 +21,7 @@ import org.junit.Test;
 public class MountFileSystemTest {
 
   private static final String MOUNT_TEST_DEFAULT_MOUNT = "mount.test.default.mount";
-
   private static final String MOUNT_TEST_AUTOMATIC_UPDATES_DISABLED = "mount.test.automatic.updates.disabled";
-
   private static final String MOUNT_TEST_PATH = "mount.test.path";
 
   private File ROOT = new File("./target/tmp/" + getClass().getName());
@@ -57,7 +57,7 @@ public class MountFileSystemTest {
   }
 
   @Test
-  public void testCRD() throws IOException {
+  public void testCRDFile() throws IOException {
     Path dstOfMount = new Path(_mountPath, "mount1");
     assertDoesNotExist(dstOfMount);
 
@@ -73,6 +73,58 @@ public class MountFileSystemTest {
     touchFile(file);
     assertFileExists(file);
     assertFileExists(new Path(srcOfMount, file.getName()));
+  }
+
+  @Test
+  public void testFileStatus() throws IOException {
+    Path dstOfMount = new Path(_mountPath, "mount1");
+    assertDoesNotExist(dstOfMount);
+
+    Path srcOfMount = new Path(_realPath, "testmount");
+    mkdir(srcOfMount);
+
+    MountFileSystem.addMount(_conf, srcOfMount, dstOfMount);
+
+    assertEmptyDir(dstOfMount);
+
+    Path file = new Path(dstOfMount, UUID.randomUUID()
+                                         .toString());
+    touchFile(file);
+    assertFileExists(file);
+
+    FileSystem fileSystem = file.getFileSystem(_conf);
+    FileStatus[] listStatus = fileSystem.listStatus(file);
+    assertEquals(1, listStatus.length);
+    assertEquals(file, listStatus[0].getPath());
+  }
+
+  @Test
+  public void testFileNotFoundError() throws IOException {
+    Path dstOfMount = new Path(_mountPath, "mount1");
+    assertDoesNotExist(dstOfMount);
+
+    Path srcOfMount = new Path(_realPath, "testmount");
+    mkdir(srcOfMount);
+
+    MountFileSystem.addMount(_conf, srcOfMount, dstOfMount);
+
+    assertEmptyDir(dstOfMount);
+
+    Path file = new Path(dstOfMount, UUID.randomUUID()
+                                         .toString());
+
+    FileSystem fileSystem = file.getFileSystem(_conf);
+    try {
+      fileSystem.getFileStatus(file);
+      fail();
+    } catch (Exception e) {
+      if (e instanceof FileNotFoundException) {
+        System.out.println(e.getMessage());
+        e.printStackTrace();
+      } else {
+        fail();
+      }
+    }
   }
 
   private void assertFileExists(Path path) throws IOException {

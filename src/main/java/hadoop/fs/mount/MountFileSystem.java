@@ -12,8 +12,12 @@ import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.fs.permission.FsPermission;
 import org.apache.hadoop.util.Progressable;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class MountFileSystem extends FileSystem {
+
+  private static final Logger LOGGER = LoggerFactory.getLogger(MountFileSystem.class);
 
   private Path _workingDir;
   private URI _uri;
@@ -39,7 +43,7 @@ public class MountFileSystem extends FileSystem {
   }
 
   private Mount getMount(Path path) {
-    return _mountCache.getMount(path);
+    return _mountCache.getMount(makeQualified(path));
   }
 
   @Override
@@ -49,9 +53,25 @@ public class MountFileSystem extends FileSystem {
 
   @Override
   public FSDataInputStream open(Path f, int bufferSize) throws IOException {
-    Path path = toMountPath(f);
-    FileSystem fileSystem = path.getFileSystem(getConf());
-    return fileSystem.open(path, bufferSize);
+    Mount mount = getMount(f);
+    Path path = mount.toMountPath(f);
+    try {
+      FileSystem fileSystem = path.getFileSystem(getConf());
+      return fileSystem.open(path, bufferSize);
+    } catch (IOException e) {
+      LOGGER.error(e.getMessage(), e);
+      throw handleError(e, mount, path);
+    }
+  }
+
+  private IOException handleError(IOException e, Mount mount, Path path) throws IOException {
+    System.err.println(path);
+    return new IOException(fixMessage(path, mount.fromMountPath(path), e.getMessage()), e.getCause());
+  }
+
+  private String fixMessage(Path realPath, Path virtualPath, String message) {
+    System.err.println(realPath.toString());
+    return message.replace(realPath.toString(), virtualPath.toString());
   }
 
   @Override
