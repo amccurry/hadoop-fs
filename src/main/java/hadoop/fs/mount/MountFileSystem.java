@@ -15,10 +15,9 @@ import org.apache.hadoop.util.Progressable;
 
 public class MountFileSystem extends FileSystem {
 
-  private static final String INFO_PATH = ".info.path";
   private Path _workingDir;
   private URI _uri;
-  private Path _infoPath;
+  private MountCache _mountCache;
 
   @Override
   public URI getUri() {
@@ -28,15 +27,19 @@ public class MountFileSystem extends FileSystem {
   @Override
   public void initialize(URI name, Configuration conf) throws IOException {
     _uri = name;
-    String authority = _uri.getAuthority();
-    String infoStr = conf.get(getScheme() + "." + authority + INFO_PATH);
-    Path infoPath = new Path(infoStr);
-    FileSystem fileSystem = infoPath.getFileSystem(getConf());
-    _infoPath = fileSystem.makeQualified(infoPath);
+    _mountCache = MountCache.getInstance(conf, getConfigPrefix(), new Path(_uri.getScheme(), _uri.getAuthority(), "/"));
+  }
+
+  public void reloadMounts() throws IOException {
+    _mountCache.reloadMounts();
+  }
+
+  public String getConfigPrefix() {
+    return getScheme() + "." + getUri().getAuthority();
   }
 
   private Mount getMount(Path path) {
-    return null;
+    return _mountCache.getMount(path);
   }
 
   @Override
@@ -153,6 +156,19 @@ public class MountFileSystem extends FileSystem {
     URI srcUri = srcFs.getUri();
     URI dstUri = dstFs.getUri();
     return srcUri.equals(dstUri);
+  }
+
+  public Path getRealPath(Path path) throws IOException {
+    return toMountPath(path);
+  }
+
+  public void addMount(Path srcPath, Path dstPath) {
+    _mountCache.addMount(srcPath, dstPath);
+  }
+
+  public static void addMount(Configuration conf, Path srcPath, Path dstPath) throws IOException {
+    MountFileSystem fileSystem = (MountFileSystem) dstPath.getFileSystem(conf);
+    fileSystem.addMount(srcPath, dstPath);
   }
 
 }

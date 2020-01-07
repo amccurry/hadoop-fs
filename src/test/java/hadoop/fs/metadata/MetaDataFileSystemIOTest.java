@@ -22,8 +22,8 @@ import org.junit.Test;
 
 public class MetaDataFileSystemIOTest {
 
-  private static final String REMOTE_DATA_PATH = "metadata.data.path";
-  private static final String REMOTE_META_PATH = "metadata.meta.path";
+  private static final String DATA_PATH = "metadata.data.path";
+  private static final String META_PATH = "metadata.meta.path";
 
   private File ROOT = new File("./target/tmp/" + getClass().getName());
   private Path _metaPath;
@@ -54,8 +54,8 @@ public class MetaDataFileSystemIOTest {
     local.mkdirs(_linkPath);
     _linkPath = local.makeQualified(_linkPath);
 
-    _conf.set(REMOTE_META_PATH, _metaPath.toString());
-    _conf.set(REMOTE_DATA_PATH, _dataPath.toString());
+    _conf.set(META_PATH, _metaPath.toString());
+    _conf.set(DATA_PATH, _dataPath.toString());
   }
 
   @Test
