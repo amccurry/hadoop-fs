@@ -23,33 +23,33 @@ public class MountPathRewriteTest {
 
   @Test
   public void testMountRoot() throws Exception {
-    Path srcPath = new Path("real://test1/src");
-    Path dstPath = new Path("virt://test2/dst");
-    Mount mount = new MountPathRewrite(srcPath, dstPath);
-    Path realPath = mount.toMountPath(dstPath);
-    assertEquals(srcPath, realPath);
+    Path realPath = new Path("real://test1/src");
+    Path virtualPath = new Path("virt://test2/dst");
+    Mount mount = new MountPathRewrite(realPath, virtualPath);
+    Path realDir = mount.toMountPath(virtualPath);
+    assertEquals(realPath, realDir);
 
-    Path virutalPath = mount.fromMountPath(realPath);
-    assertEquals(dstPath, virutalPath);
+    Path virtualDir = mount.fromMountPath(realDir);
+    assertEquals(virtualPath, virtualDir);
   }
 
   @Test
   public void testMountSubDir() throws Exception {
-    Path srcPath = new Path("real://test1/src");
-    Path dstPath = new Path("virt://test2/dst");
-    Mount mount = new MountPathRewrite(srcPath, dstPath);
-    Path realPath = mount.toMountPath(new Path(dstPath, "test1/test2/test3"));
-    assertEquals(new Path(srcPath, "test1/test2/test3"), realPath);
+    Path realPath = new Path("real://test1/src");
+    Path virtualPath = new Path("virt://test2/dst");
+    Mount mount = new MountPathRewrite(realPath, virtualPath);
+    Path realDir = mount.toMountPath(new Path(virtualPath, "test1/test2/test3"));
+    assertEquals(new Path(realPath, "test1/test2/test3"), realDir);
 
-    Path virutalPath = mount.fromMountPath(realPath);
-    assertEquals(new Path(dstPath, "test1/test2/test3"), virutalPath);
+    Path virtualDir = mount.fromMountPath(realDir);
+    assertEquals(new Path(virtualPath, "test1/test2/test3"), virtualDir);
   }
 
   @Test
   public void testGetMountKey() throws Exception {
-    Path srcPath = new Path("real://test1/src");
-    Path dstPath = new Path("virt://test2/dst/test/1/");
-    MountPathRewrite mount = new MountPathRewrite(srcPath, dstPath);
+    Path realPath = new Path("real://test1/src");
+    Path virutalPath = new Path("virt://test2/dst/test/1/");
+    MountPathRewrite mount = new MountPathRewrite(realPath, virutalPath);
     MountKey mountKey = MountKey.builder()
                                 .authority("test2")
                                 .scheme("virt")

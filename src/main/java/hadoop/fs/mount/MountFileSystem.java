@@ -23,27 +23,34 @@ public class MountFileSystem extends FileSystem {
   private URI _uri;
   private MountCache _mountCache;
 
-  @Override
-  public URI getUri() {
-    return _uri;
+  public static void addMount(Configuration conf, Path realPath, Path virtualPath) throws IOException {
+    MountFileSystem fileSystem = (MountFileSystem) virtualPath.getFileSystem(conf);
+    fileSystem.addMount(realPath, virtualPath);
   }
 
-  @Override
-  public void initialize(URI name, Configuration conf) throws IOException {
-    _uri = name;
-    _mountCache = MountCache.getInstance(conf, getConfigPrefix(), new Path(_uri.getScheme(), _uri.getAuthority(), "/"));
+  public Path getRealPath(Path virtualPath) throws IOException {
+    return toMountPath(makeQualified(virtualPath));
+  }
+
+  public void addMount(Path realPath, Path virtualPath) throws IOException {
+    FileSystem fileSystem = realPath.getFileSystem(getConf());
+    realPath = fileSystem.makeQualified(realPath);
+    _mountCache.addMount(realPath, makeQualified(virtualPath));
   }
 
   public void reloadMounts() throws IOException {
     _mountCache.reloadMounts();
   }
 
-  public String getConfigPrefix() {
-    return getScheme() + "." + getUri().getAuthority();
+  @Override
+  public void initialize(URI uri, Configuration conf) throws IOException {
+    _uri = uri;
+    _mountCache = MountCache.getInstance(conf, getConfigPrefix(), new Path(_uri.getScheme(), _uri.getAuthority(), "/"));
   }
 
-  private Mount getMount(Path path) {
-    return _mountCache.getMount(makeQualified(path));
+  @Override
+  public URI getUri() {
+    return _uri;
   }
 
   @Override
@@ -59,34 +66,36 @@ public class MountFileSystem extends FileSystem {
       FileSystem fileSystem = path.getFileSystem(getConf());
       return fileSystem.open(path, bufferSize);
     } catch (IOException e) {
-      LOGGER.error(e.getMessage(), e);
+      LOGGER.debug(e.getMessage(), e);
       throw handleError(e, mount, path);
     }
-  }
-
-  private IOException handleError(IOException e, Mount mount, Path path) throws IOException {
-    System.err.println(path);
-    return new IOException(fixMessage(path, mount.fromMountPath(path), e.getMessage()), e.getCause());
-  }
-
-  private String fixMessage(Path realPath, Path virtualPath, String message) {
-    System.err.println(realPath.toString());
-    return message.replace(realPath.toString(), virtualPath.toString());
   }
 
   @Override
   public FSDataOutputStream create(Path f, FsPermission permission, boolean overwrite, int bufferSize,
       short replication, long blockSize, Progressable progress) throws IOException {
-    Path path = toMountPath(f);
-    FileSystem fileSystem = path.getFileSystem(getConf());
-    return fileSystem.create(path, overwrite, bufferSize, replication, blockSize, progress);
+    Mount mount = getMount(f);
+    Path path = mount.toMountPath(f);
+    try {
+      FileSystem fileSystem = path.getFileSystem(getConf());
+      return fileSystem.create(path, overwrite, bufferSize, replication, blockSize, progress);
+    } catch (IOException e) {
+      LOGGER.debug(e.getMessage(), e);
+      throw handleError(e, mount, path);
+    }
   }
 
   @Override
   public FSDataOutputStream append(Path f, int bufferSize, Progressable progress) throws IOException {
-    Path path = toMountPath(f);
-    FileSystem fileSystem = path.getFileSystem(getConf());
-    return fileSystem.append(path, bufferSize, progress);
+    Mount mount = getMount(f);
+    Path path = mount.toMountPath(f);
+    try {
+      FileSystem fileSystem = path.getFileSystem(getConf());
+      return fileSystem.append(path, bufferSize, progress);
+    } catch (IOException e) {
+      LOGGER.debug(e.getMessage(), e);
+      throw handleError(e, mount, path);
+    }
   }
 
   @Override
@@ -105,32 +114,54 @@ public class MountFileSystem extends FileSystem {
 
   @Override
   public boolean delete(Path f, boolean recursive) throws IOException {
-    Path path = toMountPath(f);
-    FileSystem fileSystem = path.getFileSystem(getConf());
-    return fileSystem.delete(path, recursive);
+    Mount mount = getMount(f);
+    Path path = mount.toMountPath(f);
+    try {
+      FileSystem fileSystem = path.getFileSystem(getConf());
+      return fileSystem.delete(path, recursive);
+    } catch (IOException e) {
+      LOGGER.debug(e.getMessage(), e);
+      throw handleError(e, mount, path);
+    }
   }
 
   @Override
   public FileStatus[] listStatus(Path f) throws FileNotFoundException, IOException {
     Mount mount = getMount(f);
     Path path = mount.toMountPath(f);
-    FileSystem fileSystem = path.getFileSystem(getConf());
-    return fromMountPath(mount, fileSystem.listStatus(path));
+    try {
+      FileSystem fileSystem = path.getFileSystem(getConf());
+      return fromMountPath(mount, fileSystem.listStatus(path));
+    } catch (IOException e) {
+      LOGGER.debug(e.getMessage(), e);
+      throw handleError(e, mount, path);
+    }
   }
 
   @Override
   public boolean mkdirs(Path f, FsPermission permission) throws IOException {
-    Path path = toMountPath(f);
-    FileSystem fileSystem = path.getFileSystem(getConf());
-    return fileSystem.mkdirs(path, permission);
+    Mount mount = getMount(f);
+    Path path = mount.toMountPath(f);
+    try {
+      FileSystem fileSystem = path.getFileSystem(getConf());
+      return fileSystem.mkdirs(path, permission);
+    } catch (IOException e) {
+      LOGGER.debug(e.getMessage(), e);
+      throw handleError(e, mount, path);
+    }
   }
 
   @Override
   public FileStatus getFileStatus(Path f) throws IOException {
     Mount mount = getMount(f);
     Path path = mount.toMountPath(f);
-    FileSystem fileSystem = path.getFileSystem(getConf());
-    return fromMountPath(mount, fileSystem.getFileStatus(path));
+    try {
+      FileSystem fileSystem = path.getFileSystem(getConf());
+      return fromMountPath(mount, fileSystem.getFileStatus(path));
+    } catch (IOException e) {
+      LOGGER.debug(e.getMessage(), e);
+      throw handleError(e, mount, path);
+    }
   }
 
   @Override
@@ -178,17 +209,22 @@ public class MountFileSystem extends FileSystem {
     return srcUri.equals(dstUri);
   }
 
-  public Path getRealPath(Path path) throws IOException {
-    return toMountPath(path);
+  private IOException handleError(IOException e, Mount mount, Path path) throws IOException {
+    if (e instanceof FileNotFoundException) {
+      return new FileNotFoundException(fixMessage(path, mount.fromMountPath(path), e.getMessage()));
+    }
+    return new IOException(fixMessage(path, mount.fromMountPath(path), e.getMessage()), e.getCause());
   }
 
-  public void addMount(Path srcPath, Path dstPath) {
-    _mountCache.addMount(srcPath, dstPath);
+  private String fixMessage(Path realPath, Path virtualPath, String message) {
+    return message.replace(realPath.toString(), virtualPath.toString());
   }
 
-  public static void addMount(Configuration conf, Path srcPath, Path dstPath) throws IOException {
-    MountFileSystem fileSystem = (MountFileSystem) dstPath.getFileSystem(conf);
-    fileSystem.addMount(srcPath, dstPath);
+  private String getConfigPrefix() {
+    return getScheme() + "." + getUri().getAuthority();
   }
 
+  private Mount getMount(Path path) {
+    return _mountCache.getMount(makeQualified(path));
+  }
 }

@@ -16,15 +16,15 @@ import lombok.Value;
 @EqualsAndHashCode
 public class MountEntry {
 
-  String srcPath;
+  String realPath;
 
-  String dstPath;
+  String virtualPath;
 
-  public Path getSrcPath() {
-    return new Path(srcPath);
+  public Path getRealPath() {
+    return new Path(realPath);
   }
 
-  public Path getDstPath() {
-    return new Path(dstPath);
+  public Path getVirtualPath() {
+    return new Path(virtualPath);
   }
 }

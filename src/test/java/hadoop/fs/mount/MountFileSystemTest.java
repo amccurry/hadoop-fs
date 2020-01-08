@@ -28,7 +28,7 @@ public class MountFileSystemTest {
   private Path _realPath;
   private Configuration _conf;
 
-  private Path _mountPath;
+  private Path _mountFsRoot;
 
   @Before
   public void setup() throws Exception {
@@ -45,8 +45,7 @@ public class MountFileSystemTest {
     local.mkdirs(_realPath);
     _realPath = local.makeQualified(_realPath);
 
-    _mountPath = new Path("mount", "test", _realPath.toUri()
-                                                    .getPath());
+    _mountFsRoot = new Path("mount", "test", "/");
 
     Path mounts = new Path(_realPath, "mounts.file");
     mounts = local.makeQualified(mounts);
@@ -58,37 +57,37 @@ public class MountFileSystemTest {
 
   @Test
   public void testCRDFile() throws IOException {
-    Path dstOfMount = new Path(_mountPath, "mount1");
-    assertDoesNotExist(dstOfMount);
+    Path mountDir = new Path(_mountFsRoot, "mnt");
+    assertDoesNotExist(mountDir);
 
-    Path srcOfMount = new Path(_realPath, "testmount");
-    mkdir(srcOfMount);
+    Path realDirPath = new Path(_realPath, "testmount");
+    mkdir(realDirPath);
 
-    MountFileSystem.addMount(_conf, srcOfMount, dstOfMount);
+    MountFileSystem.addMount(_conf, realDirPath, mountDir);
 
-    assertEmptyDir(dstOfMount);
+    assertEmptyDir(mountDir);
 
-    Path file = new Path(dstOfMount, UUID.randomUUID()
-                                         .toString());
+    Path file = new Path(mountDir, UUID.randomUUID()
+                                       .toString());
     touchFile(file);
     assertFileExists(file);
-    assertFileExists(new Path(srcOfMount, file.getName()));
+    assertFileExists(new Path(realDirPath, file.getName()));
   }
 
   @Test
   public void testFileStatus() throws IOException {
-    Path dstOfMount = new Path(_mountPath, "mount1");
-    assertDoesNotExist(dstOfMount);
+    Path mountDir = new Path(_mountFsRoot, "mnt");
+    assertDoesNotExist(mountDir);
 
-    Path srcOfMount = new Path(_realPath, "testmount");
-    mkdir(srcOfMount);
+    Path realDirPath = new Path(_realPath, "testmount");
+    mkdir(realDirPath);
 
-    MountFileSystem.addMount(_conf, srcOfMount, dstOfMount);
+    MountFileSystem.addMount(_conf, realDirPath, mountDir);
 
-    assertEmptyDir(dstOfMount);
+    assertEmptyDir(mountDir);
 
-    Path file = new Path(dstOfMount, UUID.randomUUID()
-                                         .toString());
+    Path file = new Path(mountDir, UUID.randomUUID()
+                                       .toString());
     touchFile(file);
     assertFileExists(file);
 
@@ -100,18 +99,18 @@ public class MountFileSystemTest {
 
   @Test
   public void testFileNotFoundError() throws IOException {
-    Path dstOfMount = new Path(_mountPath, "mount1");
-    assertDoesNotExist(dstOfMount);
+    Path mountDir = new Path(_mountFsRoot, "mnt");
+    assertDoesNotExist(mountDir);
 
-    Path srcOfMount = new Path(_realPath, "testmount");
-    mkdir(srcOfMount);
+    Path realDirPath = new Path(_realPath, "testmount");
+    mkdir(realDirPath);
 
-    MountFileSystem.addMount(_conf, srcOfMount, dstOfMount);
+    MountFileSystem.addMount(_conf, realDirPath, mountDir);
 
-    assertEmptyDir(dstOfMount);
+    assertEmptyDir(mountDir);
 
-    Path file = new Path(dstOfMount, UUID.randomUUID()
-                                         .toString());
+    Path file = new Path(mountDir, UUID.randomUUID()
+                                       .toString());
 
     FileSystem fileSystem = file.getFileSystem(_conf);
     try {
@@ -119,8 +118,7 @@ public class MountFileSystemTest {
       fail();
     } catch (Exception e) {
       if (e instanceof FileNotFoundException) {
-        System.out.println(e.getMessage());
-        e.printStackTrace();
+
       } else {
         fail();
       }

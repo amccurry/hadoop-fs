@@ -3,11 +3,11 @@ package hadoop.fs.mount;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
-import java.net.URI;
 import java.util.Map;
 import java.util.Timer;
 import java.util.TimerTask;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -26,36 +26,39 @@ public class MountCache {
   private static final Logger LOGGER = LoggerFactory.getLogger(MountCache.class);
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
+  private static final String MOUNT_RELOAD = "mount-reload/";
   private static final String PATH_SUFFIX = ".path";
   private static final String PERIOD_SUFFIX = ".period";
   private static final String DELAY_SUFFIX = ".delay";
   private static final String AUTOMATIC_UPDATES_DISABLED_SUFFIX = ".automatic.updates.disabled";
   private static final String DEFAULT_MOUNT_SUFFIX = ".default.mount";
 
-  private static MountCache INSTANCE;
+  private static final Map<String, MountCache> INSTANCES = new ConcurrentHashMap<>();
 
-  public synchronized static MountCache getInstance(Configuration conf, String configPrefix, Path rootMountFsPath)
+  public synchronized static MountCache getInstance(Configuration conf, String configPrefix, Path rootVirtualPath)
       throws IOException {
-    if (INSTANCE == null) {
-      INSTANCE = new MountCache(conf, configPrefix, rootMountFsPath);
+    MountCache mountCache = INSTANCES.get(configPrefix);
+    if (mountCache == null) {
+      INSTANCES.put(configPrefix, mountCache = new MountCache(conf, configPrefix, rootVirtualPath));
     }
-    return INSTANCE;
+    return mountCache;
   }
 
-  private final AtomicReference<Map<MountKey, MountPathRewrite>> _mountsRef = new AtomicReference<>(
+  private final AtomicReference<Map<MountKey, MountPathRewrite>> _reloadingMountsRef = new AtomicReference<>(
       new ConcurrentHashMap<>());
+  private final Map<MountKey, MountPathRewrite> _mounts = new ConcurrentHashMap<>();
   private final Timer _timer;
   private final Path _mountPath;
   private final Configuration _conf;
   private final MountPathRewrite _defaultMount;
 
-  private MountCache(Configuration conf, String configPrefix, Path rootMountFsPath) throws IOException {
-    _timer = new Timer("mount-reload", true);
+  private MountCache(Configuration conf, String configPrefix, Path rootVirtualPath) throws IOException {
+    _timer = new Timer(MOUNT_RELOAD + configPrefix, true);
     _conf = conf;
 
-    String defaultMount = conf.get(configPrefix + DEFAULT_MOUNT_SUFFIX);
-    Path defaultMountPath = getDefaultMountPath(conf, defaultMount);
-    _defaultMount = new MountPathRewrite(defaultMountPath, rootMountFsPath);
+    String defaultRealMount = conf.get(configPrefix + DEFAULT_MOUNT_SUFFIX);
+    Path defaultRealMountPath = makeQualified(conf, new Path(defaultRealMount));
+    _defaultMount = new MountPathRewrite(defaultRealMountPath, rootVirtualPath);
     boolean disableAutomaticUpdates = _conf.getBoolean(configPrefix + AUTOMATIC_UPDATES_DISABLED_SUFFIX, false);
     long delay = _conf.getLong(configPrefix + DELAY_SUFFIX, TimeUnit.SECONDS.toMillis(1));
     long period = _conf.getLong(configPrefix + PERIOD_SUFFIX, TimeUnit.MINUTES.toMillis(5));
@@ -72,6 +75,11 @@ public class MountCache {
     }
   }
 
+  private Path makeQualified(Configuration conf, Path path) throws IOException {
+    FileSystem fileSystem = path.getFileSystem(conf);
+    return fileSystem.makeQualified(path);
+  }
+
   public void reloadMounts() throws IOException {
     FileSystem fileSystem = _mountPath.getFileSystem(_conf);
     if (fileSystem.exists(_mountPath)) {
@@ -80,31 +88,50 @@ public class MountCache {
   }
 
   private void loadCache(FileSystem fileSystem) throws IOException, JsonParseException, JsonMappingException {
+    _reloadingMountsRef.set(loadFromFile());
+  }
+
+  private ConcurrentMap<MountKey, MountPathRewrite> loadFromFile() throws IOException {
+    ConcurrentMap<MountKey, MountPathRewrite> mounts = new ConcurrentHashMap<>();
+    FileSystem fileSystem = _mountPath.getFileSystem(_conf);
     try (BufferedReader reader = new BufferedReader(new InputStreamReader(fileSystem.open(_mountPath)))) {
       String line;
-      ConcurrentHashMap<MountKey, MountPathRewrite> mounts = new ConcurrentHashMap<>();
       while ((line = reader.readLine()) != null) {
         if (!line.trim()
                  .isEmpty()) {
-          MountEntry mountEntry = OBJECT_MAPPER.readValue(line, MountEntry.class);
-          MountPathRewrite mountPathRewrite = new MountPathRewrite(mountEntry.getSrcPath(), mountEntry.getDstPath());
-          mounts.put(mountPathRewrite.getMountKey(), mountPathRewrite);
+          parseLine(mounts, line);
         }
       }
-      _mountsRef.set(mounts);
     }
+    return mounts;
+  }
+
+  private void parseLine(ConcurrentMap<MountKey, MountPathRewrite> mounts, String line) throws IOException {
+    MountEntry mountEntry = OBJECT_MAPPER.readValue(line, MountEntry.class);
+    MountPathRewrite mountPathRewrite = new MountPathRewrite(mountEntry.getRealPath(), mountEntry.getVirtualPath());
+    mounts.put(mountPathRewrite.getMountKey(), mountPathRewrite);
   }
 
   public Mount getMount(Path path) {
     MountKey mountKey = MountKey.create(path);
+    Mount mount = findMount(_mounts, mountKey);
+    if (mount == null) {
+      mount = findMount(_reloadingMountsRef.get(), mountKey);
+      if (mount == null) {
+        mount = _defaultMount;
+      }
+    }
+    return mount;
+  }
+
+  private Mount findMount(Map<MountKey, MountPathRewrite> mounts, MountKey mountKey) {
     do {
-      Map<MountKey, MountPathRewrite> mounts = _mountsRef.get();
       Mount mount = mounts.get(mountKey);
       if (mount != null) {
         return mount;
       }
     } while ((mountKey = mountKey.getParentKey()) != null);
-    return _defaultMount;
+    return null;
   }
 
   private TimerTask getTimerTask() {
@@ -120,17 +147,8 @@ public class MountCache {
     };
   }
 
-  private Path getDefaultMountPath(Configuration conf, String defaultMount) throws IOException {
-    Path path = new Path(defaultMount);
-    FileSystem fileSystem = path.getFileSystem(conf);
-    path = fileSystem.makeQualified(path);
-    URI uri = path.toUri();
-    return new Path(uri.getScheme(), uri.getAuthority(), "/");
-  }
-
   public void addMount(Path srcPath, Path dstPath) {
-    Map<MountKey, MountPathRewrite> mounts = _mountsRef.get();
     MountPathRewrite mountPathRewrite = new MountPathRewrite(srcPath, dstPath);
-    mounts.put(mountPathRewrite.getMountKey(), mountPathRewrite);
+    _mounts.put(mountPathRewrite.getMountKey(), mountPathRewrite);
   }
 }
