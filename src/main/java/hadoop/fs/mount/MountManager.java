@@ -3,9 +3,14 @@ package hadoop.fs.mount;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.io.PrintWriter;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.List;
 import java.util.Map;
 import java.util.Timer;
 import java.util.TimerTask;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
@@ -21,11 +26,13 @@ import com.fasterxml.jackson.core.JsonParseException;
 import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
-public class MountCache {
+public class MountManager {
 
-  private static final Logger LOGGER = LoggerFactory.getLogger(MountCache.class);
+  private static final String MOUNT_FACTORY_CLASS = ".mount.factory.class";
+  private static final Logger LOGGER = LoggerFactory.getLogger(MountManager.class);
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
+  private static final String DATE_PATTERN = "YYYYMMddHHmmss";
   private static final String MOUNT_RELOAD = "mount-reload/";
   private static final String PATH_SUFFIX = ".path";
   private static final String PERIOD_SUFFIX = ".period";
@@ -33,13 +40,13 @@ public class MountCache {
   private static final String AUTOMATIC_UPDATES_DISABLED_SUFFIX = ".automatic.updates.disabled";
   private static final String DEFAULT_MOUNT_SUFFIX = ".default.mount";
 
-  private static final Map<String, MountCache> INSTANCES = new ConcurrentHashMap<>();
+  private static final Map<String, MountManager> INSTANCES = new ConcurrentHashMap<>();
 
-  public synchronized static MountCache getInstance(Configuration conf, String configPrefix, Path rootVirtualPath)
+  public synchronized static MountManager getInstance(Configuration conf, String configPrefix, Path rootVirtualPath)
       throws IOException {
-    MountCache mountCache = INSTANCES.get(configPrefix);
+    MountManager mountCache = INSTANCES.get(configPrefix);
     if (mountCache == null) {
-      INSTANCES.put(configPrefix, mountCache = new MountCache(conf, configPrefix, rootVirtualPath));
+      INSTANCES.put(configPrefix, mountCache = new MountManager(conf, configPrefix, rootVirtualPath));
     }
     return mountCache;
   }
@@ -51,11 +58,13 @@ public class MountCache {
   private final Path _mountPath;
   private final Configuration _conf;
   private final MountPathRewrite _defaultMount;
+  private final MountFactory _mountFactory;
 
-  private MountCache(Configuration conf, String configPrefix, Path rootVirtualPath) throws IOException {
+  private MountManager(Configuration conf, String configPrefix, Path rootVirtualPath) throws IOException {
     _timer = new Timer(MOUNT_RELOAD + configPrefix, true);
     _conf = conf;
 
+    _mountFactory = getMountFactory(conf, configPrefix);
     String defaultRealMount = conf.get(configPrefix + DEFAULT_MOUNT_SUFFIX);
     Path defaultRealMountPath = makeQualified(conf, new Path(defaultRealMount));
     _defaultMount = new MountPathRewrite(defaultRealMountPath, rootVirtualPath);
@@ -75,9 +84,70 @@ public class MountCache {
     }
   }
 
-  private Path makeQualified(Configuration conf, Path path) throws IOException {
-    FileSystem fileSystem = path.getFileSystem(conf);
-    return fileSystem.makeQualified(path);
+  public Mount getMount(Path path) {
+    MountKey mountKey = MountKey.create(path);
+    Mount mount = findMountFromInMemoryMounts(mountKey);
+    if (mount == null) {
+      mount = findMountFromFileMounts(mountKey);
+      if (mount == null) {
+        mount = findMountFromFactory(mountKey);
+        if (mount == null) {
+          mount = _defaultMount;
+        }
+      }
+    }
+    return mount;
+  }
+
+  private Mount findMountFromFactory(MountKey mountKey) {
+    return _mountFactory.findMount(mountKey);
+  }
+
+  private Mount findMountFromFileMounts(MountKey mountKey) {
+    return findMount(_reloadingMountsRef.get(), mountKey);
+  }
+
+  private Mount findMountFromInMemoryMounts(MountKey mountKey) {
+    return findMount(_mounts, mountKey);
+  }
+
+  public void addMount(Path realPath, Path virtualPath, boolean persistant) throws IOException {
+    MountPathRewrite mountPathRewrite = new MountPathRewrite(realPath, virtualPath);
+    _mounts.put(mountPathRewrite.getMountKey(), mountPathRewrite);
+    if (persistant) {
+      MountEntry mountEntry = MountEntry.builder()
+                                        .realPath(realPath.toString())
+                                        .virtualPath(virtualPath.toString())
+                                        .build();
+      String newEntry = OBJECT_MAPPER.writeValueAsString(mountEntry);
+      FileSystem fileSystem = _mountPath.getFileSystem(_conf);
+      Path newFile = new Path("/tmp/" + UUID.randomUUID()
+                                            .toString());
+      try (PrintWriter pw = new PrintWriter(fileSystem.create(newFile))) {
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(fileSystem.open(_mountPath)))) {
+          String line;
+          while ((line = reader.readLine()) != null) {
+            line = line.trim();
+            if (!line.isEmpty()) {
+              pw.println(line);
+            }
+          }
+        }
+        pw.println(newEntry);
+      }
+
+      // Backup existing file to old file. Then try to prompt new file. If
+      // successful then delete old file, if not then put old file back and
+      // delete the new file.
+      Path oldFile = new Path(_mountPath.getParent(), _mountPath.getName() + ".old." + now());
+      if (fileSystem.rename(_mountPath, oldFile)) {
+        if (fileSystem.rename(newFile, _mountPath)) {
+          fileSystem.delete(oldFile, false);
+        } else {
+          fileSystem.rename(oldFile, newFile);
+        }
+      }
+    }
   }
 
   public void reloadMounts() throws IOException {
@@ -85,6 +155,15 @@ public class MountCache {
     if (fileSystem.exists(_mountPath)) {
       loadCache(fileSystem);
     }
+  }
+
+  private String now() {
+    return new SimpleDateFormat(DATE_PATTERN).format(new Date());
+  }
+
+  private Path makeQualified(Configuration conf, Path path) throws IOException {
+    FileSystem fileSystem = path.getFileSystem(conf);
+    return fileSystem.makeQualified(path);
   }
 
   private void loadCache(FileSystem fileSystem) throws IOException, JsonParseException, JsonMappingException {
@@ -112,18 +191,6 @@ public class MountCache {
     mounts.put(mountPathRewrite.getMountKey(), mountPathRewrite);
   }
 
-  public Mount getMount(Path path) {
-    MountKey mountKey = MountKey.create(path);
-    Mount mount = findMount(_mounts, mountKey);
-    if (mount == null) {
-      mount = findMount(_reloadingMountsRef.get(), mountKey);
-      if (mount == null) {
-        mount = _defaultMount;
-      }
-    }
-    return mount;
-  }
-
   private Mount findMount(Map<MountKey, MountPathRewrite> mounts, MountKey mountKey) {
     do {
       Mount mount = mounts.get(mountKey);
@@ -147,8 +214,13 @@ public class MountCache {
     };
   }
 
-  public void addMount(Path srcPath, Path dstPath) {
-    MountPathRewrite mountPathRewrite = new MountPathRewrite(srcPath, dstPath);
-    _mounts.put(mountPathRewrite.getMountKey(), mountPathRewrite);
+  private MountFactory getMountFactory(Configuration conf, String configPrefix) {
+    List<MountFactory> list = conf.getInstances(configPrefix + MOUNT_FACTORY_CLASS, MountFactory.class);
+    if (list == null || list.isEmpty()) {
+      return MountFactory.DEFAULT;
+    } else {
+      return list.get(0);
+    }
   }
+
 }

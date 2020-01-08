@@ -17,15 +17,20 @@ import org.slf4j.LoggerFactory;
 
 public class MountFileSystem extends FileSystem {
 
-  private static final Logger LOGGER = LoggerFactory.getLogger(MountFileSystem.class);
+  private final Logger LOGGER = LoggerFactory.getLogger(getClass());
 
   private Path _workingDir;
   private URI _uri;
-  private MountCache _mountCache;
+  private MountManager _mountCache;
 
   public static void addMount(Configuration conf, Path realPath, Path virtualPath) throws IOException {
+    addMount(conf, realPath, virtualPath, false);
+  }
+
+  public static void addMount(Configuration conf, Path realPath, Path virtualPath, boolean persistant)
+      throws IOException {
     MountFileSystem fileSystem = (MountFileSystem) virtualPath.getFileSystem(conf);
-    fileSystem.addMount(realPath, virtualPath);
+    fileSystem.addMount(realPath, virtualPath, persistant);
   }
 
   public Path getRealPath(Path virtualPath) throws IOException {
@@ -33,9 +38,13 @@ public class MountFileSystem extends FileSystem {
   }
 
   public void addMount(Path realPath, Path virtualPath) throws IOException {
+    addMount(realPath, virtualPath, false);
+  }
+
+  public void addMount(Path realPath, Path virtualPath, boolean persistant) throws IOException {
     FileSystem fileSystem = realPath.getFileSystem(getConf());
     realPath = fileSystem.makeQualified(realPath);
-    _mountCache.addMount(realPath, makeQualified(virtualPath));
+    _mountCache.addMount(realPath, makeQualified(virtualPath), persistant);
   }
 
   public void reloadMounts() throws IOException {
@@ -45,7 +54,7 @@ public class MountFileSystem extends FileSystem {
   @Override
   public void initialize(URI uri, Configuration conf) throws IOException {
     _uri = uri;
-    _mountCache = MountCache.getInstance(conf, getConfigPrefix(), new Path(_uri.getScheme(), _uri.getAuthority(), "/"));
+    _mountCache = MountManager.getInstance(conf, getConfigPrefix(), getRootPath());
   }
 
   @Override
@@ -226,5 +235,9 @@ public class MountFileSystem extends FileSystem {
 
   private Mount getMount(Path path) {
     return _mountCache.getMount(makeQualified(path));
+  }
+
+  private Path getRootPath() {
+    return new Path(_uri.getScheme(), _uri.getAuthority(), "/");
   }
 }
