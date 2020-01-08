@@ -10,11 +10,14 @@ import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.fs.permission.FsPermission;
+import org.apache.hadoop.security.UserGroupInformation;
 import org.apache.hadoop.util.Progressable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 public abstract class ContextFileSystem extends FileSystem {
+
+  private static final String USER_HOME_DIR_PREFIX = "/user/";
 
   private final Logger LOGGER = LoggerFactory.getLogger(getClass());
   private Path _workingDir;
@@ -142,6 +145,16 @@ public abstract class ContextFileSystem extends FileSystem {
   @Override
   public Path getWorkingDirectory() {
     return _workingDir;
+  }
+
+  @Override
+  public Path getHomeDirectory() {
+    try {
+      return makeQualified(new Path(USER_HOME_DIR_PREFIX + UserGroupInformation.getCurrentUser()
+                                                                               .getShortUserName()));
+    } catch (IllegalArgumentException | IOException e) {
+      throw new RuntimeException(e);
+    }
   }
 
   private FileStatus getFileStatus(PathContext context, FileStatus fileStatus) throws IOException {

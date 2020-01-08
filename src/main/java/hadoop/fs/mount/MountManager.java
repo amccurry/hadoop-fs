@@ -28,10 +28,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 public class MountManager {
 
-  private static final String MOUNT_FACTORY_CLASS = ".mount.factory.class";
   private static final Logger LOGGER = LoggerFactory.getLogger(MountManager.class);
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
+  private static final String MOUNT_FACTORY_CLASS = ".mount.factory.class";
   private static final String DATE_PATTERN = "YYYYMMddHHmmss";
   private static final String MOUNT_RELOAD = "mount-reload/";
   private static final String PATH_SUFFIX = ".path";
@@ -65,22 +65,25 @@ public class MountManager {
     _conf = conf;
 
     _mountFactory = getMountFactory(conf, configPrefix);
+    _mountFactory.initialize();
     String defaultRealMount = conf.get(configPrefix + DEFAULT_MOUNT_SUFFIX);
     Path defaultRealMountPath = makeQualified(conf, new Path(defaultRealMount));
     _defaultMount = new MountPathRewrite(defaultRealMountPath, rootVirtualPath);
     boolean disableAutomaticUpdates = _conf.getBoolean(configPrefix + AUTOMATIC_UPDATES_DISABLED_SUFFIX, false);
     long delay = _conf.getLong(configPrefix + DELAY_SUFFIX, TimeUnit.SECONDS.toMillis(1));
     long period = _conf.getLong(configPrefix + PERIOD_SUFFIX, TimeUnit.MINUTES.toMillis(5));
-    String configName = configPrefix + PATH_SUFFIX;
-    String mountPathStr = _conf.get(configName);
-    if (mountPathStr == null) {
-      throw new IllegalArgumentException("Config param " + configName + " missing");
-    }
-    Path mountPath = new Path(mountPathStr);
-    FileSystem fileSystem = mountPath.getFileSystem(conf);
-    _mountPath = fileSystem.makeQualified(mountPath);
     if (!disableAutomaticUpdates) {
+      String configName = configPrefix + PATH_SUFFIX;
+      String mountPathStr = _conf.get(configName);
+      if (mountPathStr == null) {
+        throw new IllegalArgumentException("Config param " + configName + " missing");
+      }
+      Path mountPath = new Path(mountPathStr);
+      FileSystem fileSystem = mountPath.getFileSystem(conf);
+      _mountPath = fileSystem.makeQualified(mountPath);
       _timer.schedule(getTimerTask(), delay, period);
+    } else {
+      _mountPath = null;
     }
   }
 
@@ -100,7 +103,13 @@ public class MountManager {
   }
 
   private Mount findMountFromFactory(MountKey mountKey) {
-    return _mountFactory.findMount(mountKey);
+    do {
+      Mount mount = _mountFactory.findMount(mountKey);
+      if (mount != null) {
+        return mount;
+      }
+    } while ((mountKey = mountKey.getParentKey()) != null);
+    return null;
   }
 
   private Mount findMountFromFileMounts(MountKey mountKey) {

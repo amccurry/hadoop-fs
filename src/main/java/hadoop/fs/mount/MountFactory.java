@@ -6,6 +6,10 @@ public interface MountFactory {
 
   };
 
+  default void initialize() {
+
+  }
+
   default Mount findMount(MountKey mountKey) {
     return null;
   }

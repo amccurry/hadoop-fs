@@ -61,6 +61,7 @@ public class MetaDataFileSystem extends FileSystem {
   private String _metaPathScheme;
   private String _metaPathAuthority;
   private UserGroupInformation _dataUgi;
+  private String _configPrefix;
 
   @Override
   public void initialize(URI uri, Configuration conf) throws IOException {
@@ -70,9 +71,10 @@ public class MetaDataFileSystem extends FileSystem {
       throw new IOException("uri " + uri + " does match filesystem scheme " + getScheme());
     }
     _fsUri = uri;
+    _configPrefix = _fsUri.getScheme() + "." + _fsUri.getAuthority();
     _authority = uri.getAuthority();
-    _metaPath = getQualifiedPathFromConf(conf, getScheme() + META_PATH_SUFFIX);
-    _dataPath = getQualifiedPathFromConf(conf, getScheme() + DATA_PATH_SUFFIX);
+    _metaPath = getQualifiedPathFromConf(conf, getConfigPrefix() + META_PATH_SUFFIX);
+    _dataPath = getQualifiedPathFromConf(conf, getConfigPrefix() + DATA_PATH_SUFFIX);
     _rootMetaPath = _metaPath.toUri()
                              .getPath();
     _rootMetaPathParts = split(_rootMetaPath);
@@ -81,11 +83,15 @@ public class MetaDataFileSystem extends FileSystem {
     _metaPathAuthority = _metaPath.toUri()
                                   .getAuthority();
 
-    String principal = conf.get(getScheme() + DATA_PRINCIPAL_SUFFIX);
+    String principal = conf.get(getConfigPrefix() + DATA_PRINCIPAL_SUFFIX);
     if (principal != null) {
-      String keytab = conf.get(getScheme() + DATA_KEYTAB_SUFFIX);
+      String keytab = conf.get(getConfigPrefix() + DATA_KEYTAB_SUFFIX);
       _dataUgi = UserGroupInformation.loginUserFromKeytabAndReturnUGI(principal, keytab);
     }
+  }
+
+  private String getConfigPrefix() {
+    return _configPrefix;
   }
 
   /**
@@ -180,7 +186,7 @@ public class MetaDataFileSystem extends FileSystem {
     try {
       MetaEntry metaSrcEntry = getMetaEntry(src);
       Path metaSrcPath = metaSrcEntry.getMetaPath();
-      MetaEntry metaDstEntry = getMetaEntry(src);
+      MetaEntry metaDstEntry = getMetaEntry(dst);
       Path metaDstPath = metaDstEntry.getMetaPath();
 
       FileSystem srcmetaFs = metaSrcPath.getFileSystem(getConf());
@@ -574,18 +580,22 @@ public class MetaDataFileSystem extends FileSystem {
       return null;
     }
     Path metaPath = metaFileStatus.getPath();
-    DataEntry dataEntry = getDataEntry(metaPath);
     long length;
-    WriteState writeState = dataEntry.getWriteState();
-    if (writeState == WriteState.CLOSED) {
-      Path dataPath = dataEntry.getDataPath();
-      FileSystem dataFs = dataPath.getFileSystem(getConf());
-      FileStatus dataFileStatus = dataFs.getFileStatus(dataPath);
-      length = dataFileStatus.getLen();
-    } else if (writeState == WriteState.WRITING) {
-      length = 0;
+    if (!metaFileStatus.isDirectory()) {
+      DataEntry dataEntry = getDataEntry(metaPath);
+      WriteState writeState = dataEntry.getWriteState();
+      if (writeState == WriteState.CLOSED) {
+        Path dataPath = dataEntry.getDataPath();
+        FileSystem dataFs = dataPath.getFileSystem(getConf());
+        FileStatus dataFileStatus = dataFs.getFileStatus(dataPath);
+        length = dataFileStatus.getLen();
+      } else if (writeState == WriteState.WRITING) {
+        length = 0;
+      } else {
+        throw new IOException("Unknown write state for meta path " + metaPath.toString());
+      }
     } else {
-      throw new IOException("Unknown write state for meta path " + metaPath.toString());
+      length = metaFileStatus.getLen();
     }
 
     Path path = getVirtualPath(metaPath);

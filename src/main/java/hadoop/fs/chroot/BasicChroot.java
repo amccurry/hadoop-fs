@@ -12,20 +12,24 @@ public class BasicChroot extends Configured implements Chroot {
 
   private static final String FS = ".fs";
 
+  private Path _chrootRoot;
   private Path _real;
-  private String _realPath;
-  private URI _chrootUri;
-  private FileSystem _realFileSystem;
+  private URI _chrootFileSystemUri;
+  private URI _realFileSystemUri;
 
   @Override
   public void initialize(Configuration conf, ChrootFileSystem chrootFileSystem) throws IOException {
-    _chrootUri = chrootFileSystem.getUri();
-    String basePathStr = conf.get(chrootFileSystem.getConfigPrefix() + FS);
-    Path path = new Path(basePathStr);
-    _realFileSystem = path.getFileSystem(getConf());
-    _real = _realFileSystem.makeQualified(path);
-    URI uri = _real.toUri();
-    _realPath = uri.getPath();
+    Path path = new Path(conf.get(chrootFileSystem.getConfigPrefix() + FS));
+    FileSystem fileSystem = path.getFileSystem(getConf());
+    path = fileSystem.makeQualified(path);
+    initialize(chrootFileSystem.getUri(), fileSystem.getUri(), path);
+  }
+
+  void initialize(URI chrootFileSystemUri, URI realFileSystemUri, Path realQualified) throws IOException {
+    _chrootFileSystemUri = chrootFileSystemUri;
+    _realFileSystemUri = realFileSystemUri;
+    _chrootRoot = new Path(_chrootFileSystemUri.getScheme(), _chrootFileSystemUri.getAuthority(), "/");
+    _real = realQualified;
   }
 
   @Override
@@ -36,9 +40,9 @@ public class BasicChroot extends Configured implements Chroot {
       path = "/";
     }
     if (path.equals("/")) {
-      return _real;
+      return getRealPath();
     }
-    return new Path(_real, path.substring(1));
+    return new Path(getRealPath(), path.substring(1));
   }
 
   @Override
@@ -46,25 +50,48 @@ public class BasicChroot extends Configured implements Chroot {
     checkRealPathUri(realPath);
     String path = realPath.toUri()
                           .getPath();
-    String pathStr = path.substring(_realPath.length());
+    String pathStr = path.substring(getRealPathStr().length());
     if (pathStr.isEmpty()) {
       pathStr = "/";
     }
-    return new Path(_chrootUri.getScheme(), _chrootUri.getAuthority(), pathStr);
+    return new Path(_chrootRoot, pathStr);
   }
 
   private void checkRealPathUri(Path realPath) throws IOException {
-    FileSystem fileSystem = realPath.getFileSystem(getConf());
-    if (!fileSystem.getUri()
-                   .equals(_realFileSystem.getUri())) {
-      throw new IllegalArgumentException(
-          "Wrong filesystem for " + realPath + ", expected " + _realFileSystem + " was " + fileSystem);
-    }
     URI uri = realPath.toUri();
-    if (!uri.getPath()
-            .startsWith(_realPath)) {
-      throw new IllegalArgumentException("Wrong path, expected " + _realPath + "/* was " + uri.getPath());
+    if (!equals(uri.getScheme(), _realFileSystemUri.getScheme())) {
+      throw new IllegalArgumentException(
+          "Wrong scheme for " + realPath + ", expected " + _realFileSystemUri + " was " + _realFileSystemUri);
     }
+
+    if (!equals(uri.getAuthority(), _realFileSystemUri.getAuthority())) {
+      throw new IllegalArgumentException(
+          "Wrong authority for " + realPath + ", expected " + _realFileSystemUri + " was " + _realFileSystemUri);
+    }
+
+    if (!uri.getPath()
+            .startsWith(getRealPathStr())) {
+      throw new IllegalArgumentException("Wrong path, expected " + getRealPathStr() + "/* was " + uri.getPath());
+    }
+  }
+
+  private boolean equals(String s1, String s2) {
+    if (s1 == s2) {
+      return true;
+    } else if (s1 != null) {
+      return s1.equals(s2);
+    } else {
+      return false;
+    }
+  }
+
+  private String getRealPathStr() throws IOException {
+    return getRealPath().toUri()
+                        .getPath();
+  }
+
+  protected Path getRealPath() throws IOException {
+    return _real;
   }
 
 }

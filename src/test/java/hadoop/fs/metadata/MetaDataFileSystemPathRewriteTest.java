@@ -22,8 +22,8 @@ public class MetaDataFileSystemPathRewriteTest {
   public void setup() throws Exception {
     _fileSystem = new MetaDataFileSystem();
     Configuration conf = new Configuration();
-    conf.set("metadata.meta.path", "file:///meta");
-    conf.set("metadata.data.path", "file:///data");
+    conf.set("metadata.test.meta.path", "file:///meta");
+    conf.set("metadata.test.data.path", "file:///data");
     _fileSystem.initialize(new URI("metadata://test"), conf);
   }
 

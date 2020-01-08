@@ -22,8 +22,8 @@ import org.junit.Test;
 
 public class MetaDataFileSystemIOTest {
 
-  private static final String DATA_PATH = "metadata.data.path";
-  private static final String META_PATH = "metadata.meta.path";
+  private static final String DATA_PATH = "metadata.test.data.path";
+  private static final String META_PATH = "metadata.test.meta.path";
 
   private File ROOT = new File("./target/tmp/" + getClass().getName());
   private Path _metaPath;
