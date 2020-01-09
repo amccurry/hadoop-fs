@@ -145,14 +145,16 @@ public class MetaDataFileSystem extends FileSystem {
 
   @Override
   public FSDataInputStream open(Path f, int bufferSize) throws IOException {
+    LOGGER.info("open {} {}", f, bufferSize);
     try {
       MetaEntry metaEntry = getMetaEntry(f);
       DataEntry dataEntry = getDataEntry(metaEntry.getMetaPath());
-      if (dataEntry.getWriteState() == WriteState.WRITING) {
-        throw new IOException("File " + f + " open for writing.");
-      }
       Path dataPath = dataEntry.getDataPath();
       FileSystem dataFs = dataPath.getFileSystem(getConf());
+      FileStatus fileStatus = dataFs.getFileStatus(dataPath);
+      if (fileStatus.getLen() == 0) {
+        return new FSDataInputStream(new ReadNothing());
+      }
       return dataFs.open(dataPath);
     } catch (Throwable t) {
       LOGGER.error(t.getMessage(), t);
@@ -167,9 +169,8 @@ public class MetaDataFileSystem extends FileSystem {
       MetaEntry metaEntry = getMetaEntry(f);
       Path metaPath = metaEntry.getMetaPath();
       Path dataPath = createDataPath(metaPath);
-      storeDataPath(metaPath, dataPath, permission, overwrite, WriteState.WRITING);
-      Closeable trigger = () -> storeDataPath(metaPath, dataPath, permission, overwrite, WriteState.CLOSED);
-      return createDataOutputStream(dataPath, bufferSize, progress, trigger);
+      storeDataPath(metaPath, dataPath, permission, overwrite);
+      return createDataOutputStream(dataPath, bufferSize, progress);
     } catch (Throwable t) {
       LOGGER.error(t.getMessage(), t);
       throw t;
@@ -248,6 +249,7 @@ public class MetaDataFileSystem extends FileSystem {
 
   @Override
   public FileStatus getFileStatus(Path f) throws IOException {
+    LOGGER.info("getFileStatus {}", f);
     boolean logError = true;
     try {
       MetaEntry metaEntry = getMetaEntry(f);
@@ -255,8 +257,10 @@ public class MetaDataFileSystem extends FileSystem {
       FileSystem metaFs = metaPath.getFileSystem(getConf());
       FileStatus fileStatus;
       try {
+        LOGGER.info("getFileStatus from metafs {}", metaPath);
         fileStatus = metaFs.getFileStatus(metaPath);
       } catch (FileNotFoundException e) {
+        LOGGER.info("getFileStatus FileNotFoundException {}", metaPath);
         logError = false;
         throw e;
       }
@@ -418,8 +422,8 @@ public class MetaDataFileSystem extends FileSystem {
     UUID uuid = UUID.randomUUID();
     long mostSigBits = uuid.getMostSignificantBits();
     long leastSigBits = uuid.getLeastSignificantBits();
-    String path = digits(mostSigBits >> 32, 8) + "/" + digits(mostSigBits >> 16, 4) + "/" + digits(mostSigBits, 4) + "/"
-        + digits(leastSigBits >> 48, 4) + "/" + digits(leastSigBits, 12);
+    String path = digits(mostSigBits >> 32, 8) + "-" + digits(mostSigBits >> 16, 4) + "-" + digits(mostSigBits, 4) + "-"
+        + digits(leastSigBits >> 48, 4) + "-" + digits(leastSigBits, 12);
     return new Path(_dataPath, path);
   }
 
@@ -434,8 +438,8 @@ public class MetaDataFileSystem extends FileSystem {
    * Private methods
    */
 
-  private FSDataOutputStream createDataOutputStream(Path dataPath, int bufferSize, Progressable progress,
-      Closeable trigger) throws IOException {
+  private FSDataOutputStream createDataOutputStream(Path dataPath, int bufferSize, Progressable progress)
+      throws IOException {
     UserGroupInformation dataUgi = getDataUgi();
     try {
       return dataUgi.doAs((PrivilegedExceptionAction<FSDataOutputStream>) () -> {
@@ -445,10 +449,7 @@ public class MetaDataFileSystem extends FileSystem {
             FsPermission.getUMask(getConf()));
         short dataReplication = dataFs.getDefaultReplication(dataPath);
         long dataBlockSize = dataFs.getDefaultBlockSize(dataPath);
-
-        FSDataOutputStream output = dataFs.create(dataPath, dataPermission, false, bufferSize, dataReplication,
-            dataBlockSize, progress);
-        return new RemoteFSDataOutputStream(output, null, trigger);
+        return dataFs.create(dataPath, dataPermission, false, bufferSize, dataReplication, dataBlockSize, progress);
       });
     } catch (IOException e) {
       throw e;
@@ -505,12 +506,11 @@ public class MetaDataFileSystem extends FileSystem {
     try (FSDataOutputStream output = metaFs.create(metaPath)) {
       String dataUri = dataPath.toUri()
                                .toString();
-      DataEntry storageEntry = DataEntry.builder()
-                                        .dataPathUri(dataUri)
-                                        .managed(false)
-                                        .writeState(WriteState.CLOSED)
-                                        .build();
-      storeDataPath(output, storageEntry);
+      DataEntry dataEntry = DataEntry.builder()
+                                     .dataPathUri(dataUri)
+                                     .managed(false)
+                                     .build();
+      storeDataPath(output, dataEntry);
     }
   }
 
@@ -583,16 +583,14 @@ public class MetaDataFileSystem extends FileSystem {
     long length;
     if (!metaFileStatus.isDirectory()) {
       DataEntry dataEntry = getDataEntry(metaPath);
-      WriteState writeState = dataEntry.getWriteState();
-      if (writeState == WriteState.CLOSED) {
-        Path dataPath = dataEntry.getDataPath();
-        FileSystem dataFs = dataPath.getFileSystem(getConf());
+      Path dataPath = dataEntry.getDataPath();
+      FileSystem dataFs = dataPath.getFileSystem(getConf());
+      try {
         FileStatus dataFileStatus = dataFs.getFileStatus(dataPath);
         length = dataFileStatus.getLen();
-      } else if (writeState == WriteState.WRITING) {
+      } catch (FileNotFoundException e) {
+        LOGGER.warn("DataPath {} not found using 0 length.", dataPath);
         length = 0;
-      } else {
-        throw new IOException("Unknown write state for meta path " + metaPath.toString());
       }
     } else {
       length = metaFileStatus.getLen();
@@ -612,7 +610,7 @@ public class MetaDataFileSystem extends FileSystem {
         owner, group, path);
   }
 
-  private void storeDataPath(Path metaPath, Path dataPath, FsPermission permission, boolean overwrite, WriteState state)
+  private void storeDataPath(Path metaPath, Path dataPath, FsPermission permission, boolean overwrite)
       throws IOException {
     FileSystem metaFs = metaPath.getFileSystem(getConf());
     short metaReplication = metaFs.getDefaultReplication(dataPath);
@@ -624,12 +622,13 @@ public class MetaDataFileSystem extends FileSystem {
         metaBlockSize, null)) {
       String dataUri = dataPath.toUri()
                                .toString();
-      DataEntry storageEntry = DataEntry.builder()
-                                        .dataPathUri(dataUri)
-                                        .managed(true)
-                                        .writeState(state)
-                                        .build();
-      storeDataPath(output, storageEntry);
+      DataEntry dataEntry = DataEntry.builder()
+                                     .managementId(UUID.randomUUID()
+                                                       .toString())
+                                     .dataPathUri(dataUri)
+                                     .managed(true)
+                                     .build();
+      storeDataPath(output, dataEntry);
     }
   }
 

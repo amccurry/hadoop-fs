@@ -85,6 +85,16 @@ public class MountFileSystem extends ContextFileSystem {
     };
   }
 
+  @Override
+  protected Path getOriginalPath(Path realPath) throws IOException {
+    throw new IOException("Not Implemented");
+  }
+
+  @Override
+  protected Path getContextPath(Path chrootPath) throws IOException {
+    throw new IOException("Not Implemented");
+  }
+
   private Mount getMount(Path path) {
     return _mountCache.getMount(makeQualified(path));
   }

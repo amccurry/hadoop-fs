@@ -16,11 +16,11 @@ import lombok.Value;
 @Builder(toBuilder = true)
 public class DataEntry {
 
+  String managementId;
+
   String dataPathUri;
 
   boolean managed;
-
-  WriteState writeState;
 
   @JsonIgnore
   public Path getDataPath() {
