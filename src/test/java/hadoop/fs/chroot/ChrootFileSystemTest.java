@@ -1,6 +1,7 @@
 package hadoop.fs.chroot;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -10,6 +11,7 @@ import java.io.IOException;
 import java.util.UUID;
 
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FSDataOutputStream;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.LocalFileSystem;
@@ -45,12 +47,30 @@ public class ChrootFileSystemTest {
     fileSystem.mkdirs(_realChrootPath);
 
     _conf.set(CHROOT_TEST_FS, _realChrootPath.toString());
+    assertEmptyDir(_chrootFsRoot);
+  }
+
+  @Test
+  public void testFileStatusWhileWriting() throws IOException {
+    Path file = new Path(_chrootFsRoot, UUID.randomUUID()
+                                            .toString());
+
+    FileSystem fileSystem = file.getFileSystem(_conf);
+
+    assertFalse(fileSystem.exists(file));
+
+    try (FSDataOutputStream output = fileSystem.create(file)) {
+      assertTrue(fileSystem.exists(file));
+    }
+
+    assertTrue(fileSystem.exists(file));
+    assertFileExists(file);
+    assertFileExists(new Path(_realChrootPath, file.getName()));
+
   }
 
   @Test
   public void testCRDFile() throws IOException {
-    assertEmptyDir(_chrootFsRoot);
-
     Path file = new Path(_chrootFsRoot, UUID.randomUUID()
                                             .toString());
     touchFile(file);
@@ -60,8 +80,6 @@ public class ChrootFileSystemTest {
 
   @Test
   public void testFileStatus() throws IOException {
-    assertEmptyDir(_chrootFsRoot);
-
     Path file = new Path(_chrootFsRoot, UUID.randomUUID()
                                             .toString());
     touchFile(file);
@@ -75,11 +93,8 @@ public class ChrootFileSystemTest {
 
   @Test
   public void testFileNotFoundError() throws IOException {
-    assertEmptyDir(_chrootFsRoot);
-
     Path file = new Path(_chrootFsRoot, UUID.randomUUID()
                                             .toString());
-
     FileSystem fileSystem = file.getFileSystem(_conf);
     try {
       fileSystem.getFileStatus(file);

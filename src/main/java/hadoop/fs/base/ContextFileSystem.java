@@ -22,7 +22,34 @@ public abstract class ContextFileSystem extends FileSystem {
   private final Logger LOGGER = LoggerFactory.getLogger(getClass());
   private Path _workingDir;
 
-  protected abstract PathContext getPathContext(Path f) throws IOException;
+  protected PathContext getPathContext(Path originalPath) throws IOException {
+    Path contextPath = getContextPath(originalPath);
+
+    return new PathContext() {
+
+      @Override
+      public Path getOriginalPath(Path contextPath) throws IOException {
+        return ContextFileSystem.this.getOriginalPath(contextPath);
+      }
+
+      @Override
+      public Path getOriginalPath() throws IOException {
+        return originalPath;
+      }
+
+      @Override
+      public Path getContextPath() throws IOException {
+        return contextPath;
+      }
+    };
+  }
+
+  protected abstract Path getOriginalPath(Path contextPath) throws IOException;
+
+  protected abstract Path getContextPath(Path originalPath) throws IOException;
+
+  @Override
+  public abstract String getScheme();
 
   public String getConfigPrefix() {
     return getScheme() + "." + getUri().getAuthority();
@@ -30,6 +57,7 @@ public abstract class ContextFileSystem extends FileSystem {
 
   @Override
   public FSDataInputStream open(Path f, int bufferSize) throws IOException {
+    LOGGER.info("open {} {}", f, bufferSize);
     PathContext context = getPathContext(f);
     Path path = context.getContextPath();
     try {
@@ -126,6 +154,7 @@ public abstract class ContextFileSystem extends FileSystem {
 
   @Override
   public FileStatus getFileStatus(Path f) throws IOException {
+    LOGGER.info("getFileStatus {}", f);
     PathContext context = getPathContext(f);
     Path path = context.getContextPath();
     try {

@@ -8,7 +8,6 @@ import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.util.ReflectionUtils;
 
 import hadoop.fs.base.ContextFileSystem;
-import hadoop.fs.base.PathContext;
 
 public class ChrootFileSystem extends ContextFileSystem {
 
@@ -35,33 +34,12 @@ public class ChrootFileSystem extends ContextFileSystem {
   }
 
   @Override
-  protected PathContext getPathContext(Path f) throws IOException {
-    Path chrootPath = makeQualified(f);
-    Path realPath = getRealPath(chrootPath);
-    return new PathContext() {
-
-      @Override
-      public Path getOriginalPath() throws IOException {
-        return chrootPath;
-      }
-
-      @Override
-      public Path getOriginalPath(Path contextPath) throws IOException {
-        return ChrootFileSystem.this.getChrootPath(contextPath);
-      }
-
-      @Override
-      public Path getContextPath() throws IOException {
-        return realPath;
-      }
-    };
-  }
-
-  protected Path getChrootPath(Path realPath) throws IOException {
+  protected Path getOriginalPath(Path realPath) throws IOException {
     return _chroot.getChrootPath(realPath);
   }
 
-  private Path getRealPath(Path chrootPath) throws IOException {
+  @Override
+  protected Path getContextPath(Path chrootPath) throws IOException {
     return _chroot.getRealPath(chrootPath);
   }
 

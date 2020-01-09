@@ -11,6 +11,7 @@ import java.io.IOException;
 import java.util.UUID;
 
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FSDataOutputStream;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.LocalFileSystem;
@@ -27,8 +28,9 @@ public class MountFileSystemTest {
   private File ROOT = new File("./target/tmp/" + getClass().getName());
   private Path _realPath;
   private Configuration _conf;
-
   private Path _mountFsRoot;
+  private Path _mountDir;
+  private Path _realDirPath;
 
   @Before
   public void setup() throws Exception {
@@ -53,43 +55,49 @@ public class MountFileSystemTest {
     _conf.set(MOUNT_TEST_PATH, mounts.toString());
     _conf.set(MOUNT_TEST_DEFAULT_MOUNT, _realPath.toString());
     _conf.setBoolean(MOUNT_TEST_AUTOMATIC_UPDATES_DISABLED, true);
+
+    _mountDir = new Path(_mountFsRoot, "mnt");
+    assertDoesNotExist(_mountDir);
+    _realDirPath = new Path(_realPath, "testmount");
+    mkdir(_realDirPath);
+    MountFileSystem.addMount(_conf, _realDirPath, _mountDir);
+    assertEmptyDir(_mountDir);
+  }
+
+  @Test
+  public void testFileStatusWhileWriting() throws IOException {
+    Path file = new Path(_mountDir, UUID.randomUUID()
+                                        .toString());
+
+    FileSystem fileSystem = file.getFileSystem(_conf);
+
+    assertFalse(fileSystem.exists(file));
+
+    try (FSDataOutputStream output = fileSystem.create(file)) {
+      assertTrue(fileSystem.exists(file));
+    }
+
+    assertTrue(fileSystem.exists(file));
+    assertIsFile(file);
+    assertIsFile(new Path(_realDirPath, file.getName()));
+
   }
 
   @Test
   public void testCRDFile() throws IOException {
-    Path mountDir = new Path(_mountFsRoot, "mnt");
-    assertDoesNotExist(mountDir);
-
-    Path realDirPath = new Path(_realPath, "testmount");
-    mkdir(realDirPath);
-
-    MountFileSystem.addMount(_conf, realDirPath, mountDir);
-
-    assertEmptyDir(mountDir);
-
-    Path file = new Path(mountDir, UUID.randomUUID()
-                                       .toString());
+    Path file = new Path(_mountDir, UUID.randomUUID()
+                                        .toString());
     touchFile(file);
-    assertFileExists(file);
-    assertFileExists(new Path(realDirPath, file.getName()));
+    assertIsFile(file);
+    assertIsFile(new Path(_realDirPath, file.getName()));
   }
 
   @Test
   public void testFileStatus() throws IOException {
-    Path mountDir = new Path(_mountFsRoot, "mnt");
-    assertDoesNotExist(mountDir);
-
-    Path realDirPath = new Path(_realPath, "testmount");
-    mkdir(realDirPath);
-
-    MountFileSystem.addMount(_conf, realDirPath, mountDir);
-
-    assertEmptyDir(mountDir);
-
-    Path file = new Path(mountDir, UUID.randomUUID()
-                                       .toString());
+    Path file = new Path(_mountDir, UUID.randomUUID()
+                                        .toString());
     touchFile(file);
-    assertFileExists(file);
+    assertIsFile(file);
 
     FileSystem fileSystem = file.getFileSystem(_conf);
     FileStatus[] listStatus = fileSystem.listStatus(file);
@@ -99,18 +107,8 @@ public class MountFileSystemTest {
 
   @Test
   public void testFileNotFoundError() throws IOException {
-    Path mountDir = new Path(_mountFsRoot, "mnt");
-    assertDoesNotExist(mountDir);
-
-    Path realDirPath = new Path(_realPath, "testmount");
-    mkdir(realDirPath);
-
-    MountFileSystem.addMount(_conf, realDirPath, mountDir);
-
-    assertEmptyDir(mountDir);
-
-    Path file = new Path(mountDir, UUID.randomUUID()
-                                       .toString());
+    Path file = new Path(_mountDir, UUID.randomUUID()
+                                        .toString());
 
     FileSystem fileSystem = file.getFileSystem(_conf);
     try {
@@ -125,7 +123,7 @@ public class MountFileSystemTest {
     }
   }
 
-  private void assertFileExists(Path path) throws IOException {
+  private void assertIsFile(Path path) throws IOException {
     FileStatus fileStatus = path.getFileSystem(_conf)
                                 .getFileStatus(path);
     assertTrue(fileStatus.isFile());
