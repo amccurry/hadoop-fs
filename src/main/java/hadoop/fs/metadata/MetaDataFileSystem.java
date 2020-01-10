@@ -6,6 +6,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.net.URI;
 import java.security.PrivilegedExceptionAction;
+import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
@@ -62,6 +63,8 @@ public class MetaDataFileSystem extends FileSystem {
   private String _metaPathAuthority;
   private UserGroupInformation _dataUgi;
   private String _configPrefix;
+  private int _dataEntryRetries = 10;
+  private long _dataEntryDelay = 250;
 
   @Override
   public void initialize(URI uri, Configuration conf) throws IOException {
@@ -97,11 +100,57 @@ public class MetaDataFileSystem extends FileSystem {
   /**
    * Gets data entry for given meta path;
    */
-  protected DataEntry getDataEntry(Path metaPath) throws IOException {
+  protected DataEntry getDataEntry(Path metaPath, boolean waitForDataEntry) throws IOException {
     FileSystem metaFs = metaPath.getFileSystem(getConf());
-    try (FSDataInputStream input = metaFs.open(metaPath)) {
-      return OBJECT_MAPPER.readValue(input, DataEntry.class);
+    if (waitForDataEntry) {
+      if (!waitForDataEntryToBeReadable(metaFs, metaPath)) {
+        return null;
+      }
     }
+
+    for (int i = 0; i < _dataEntryRetries; i++) {
+      try (FSDataInputStream input = metaFs.open(metaPath)) {
+        return OBJECT_MAPPER.readValue(input, DataEntry.class);
+      } catch (IOException e) {
+        if (!isCannotObtainBlockLength(e)) {
+          throw e;
+        }
+      }
+      try {
+        Thread.sleep(_dataEntryDelay);
+      } catch (InterruptedException e) {
+        throw new IOException(e);
+      }
+    }
+    return null;
+  }
+
+  private boolean isCannotObtainBlockLength(IOException e) {
+    String message = e.getMessage();
+    if (message == null) {
+      return false;
+    }
+    return message.toLowerCase()
+                  .contains("Cannot obtain block length".toLowerCase());
+  }
+
+  private boolean waitForDataEntryToBeReadable(FileSystem metaFs, Path metaPath) throws IOException {
+    FileStatus fileStatus = metaFs.getFileStatus(metaPath);
+    for (int i = 0; i < _dataEntryRetries; i++) {
+      if (fileStatus.getLen() > 0) {
+        return true;
+      }
+      try {
+        Thread.sleep(_dataEntryDelay);
+      } catch (InterruptedException e) {
+        throw new IOException(e);
+      }
+      fileStatus = metaFs.getFileStatus(metaPath);
+    }
+    if (fileStatus.getLen() > 0) {
+      return true;
+    }
+    return false;
   }
 
   /**
@@ -148,7 +197,10 @@ public class MetaDataFileSystem extends FileSystem {
     LOGGER.info("open {} {}", f, bufferSize);
     try {
       MetaEntry metaEntry = getMetaEntry(f);
-      DataEntry dataEntry = getDataEntry(metaEntry.getMetaPath());
+      DataEntry dataEntry = getDataEntry(metaEntry.getMetaPath(), true);
+      if (dataEntry == null) {
+        throw new FileNotFoundException(f.toString());
+      }
       Path dataPath = dataEntry.getDataPath();
       FileSystem dataFs = dataPath.getFileSystem(getConf());
       FileStatus fileStatus = dataFs.getFileStatus(dataPath);
@@ -264,7 +316,12 @@ public class MetaDataFileSystem extends FileSystem {
         logError = false;
         throw e;
       }
-      return fixFileStatus(fileStatus);
+      fileStatus = fixFileStatus(fileStatus);
+      if (fileStatus == null) {
+        logError = false;
+        throw new FileNotFoundException(f.toString());
+      }
+      return fileStatus;
     } catch (Throwable t) {
       if (logError) {
         LOGGER.error(t.getMessage(), t);
@@ -551,28 +608,36 @@ public class MetaDataFileSystem extends FileSystem {
   }
 
   private boolean deleteFile(FileSystem metaFs, Path metaPath) throws IOException {
-    DataEntry storageEntry = getDataEntry(metaPath);
-    Path dataPath = storageEntry.getDataPath();
-    FileSystem dataFs = dataPath.getFileSystem(getConf());
-    boolean result = metaFs.delete(metaPath, false);
-    if (storageEntry.isManaged()) {
-      if (result) {
-        if (!dataFs.delete(dataPath, false)) {
-          LOGGER.warn("Could not remove {}", dataPath);
+    DataEntry storageEntry = getDataEntry(metaPath, true);
+    if (storageEntry != null) {
+      Path dataPath = storageEntry.getDataPath();
+      FileSystem dataFs = dataPath.getFileSystem(getConf());
+      boolean result = metaFs.delete(metaPath, false);
+      if (storageEntry.isManaged()) {
+        if (result) {
+          if (!dataFs.delete(dataPath, false)) {
+            LOGGER.warn("Could not remove {}", dataPath);
+          }
         }
       }
+      return result;
+    } else {
+      return false;
     }
-    return result;
   }
 
   private FileStatus[] fixFileStatusList(FileStatus[] listStatus) throws IOException {
     if (listStatus == null) {
       return null;
     }
+    List<FileStatus> result = new ArrayList<>();
     for (int i = 0; i < listStatus.length; i++) {
-      listStatus[i] = fixFileStatus(listStatus[i]);
+      FileStatus fileStatus = fixFileStatus(listStatus[i]);
+      if (fileStatus != null) {
+        result.add(fileStatus);
+      }
     }
-    return listStatus;
+    return result.toArray(new FileStatus[] {});
   }
 
   private FileStatus fixFileStatus(FileStatus metaFileStatus) throws IOException {
@@ -582,7 +647,10 @@ public class MetaDataFileSystem extends FileSystem {
     Path metaPath = metaFileStatus.getPath();
     long length;
     if (!metaFileStatus.isDirectory()) {
-      DataEntry dataEntry = getDataEntry(metaPath);
+      DataEntry dataEntry = getDataEntry(metaPath, false);
+      if (dataEntry == null) {
+        return null;
+      }
       Path dataPath = dataEntry.getDataPath();
       FileSystem dataFs = dataPath.getFileSystem(getConf());
       try {
