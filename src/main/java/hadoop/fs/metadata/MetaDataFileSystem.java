@@ -38,6 +38,9 @@ import com.google.common.base.Splitter;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableList.Builder;
 
+import hadoop.fs.util.TimerCloseable;
+import hadoop.fs.util.TimerUtil;
+
 public class MetaDataFileSystem extends FileSystem {
 
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
@@ -194,8 +197,9 @@ public class MetaDataFileSystem extends FileSystem {
 
   @Override
   public FSDataInputStream open(Path f, int bufferSize) throws IOException {
+
     LOGGER.info("open {} {}", f, bufferSize);
-    try {
+    try (TimerCloseable time = TimerUtil.time(LOGGER, "open", f.toString())) {
       MetaEntry metaEntry = getMetaEntry(f);
       DataEntry dataEntry = getDataEntry(metaEntry.getMetaPath(), true);
       if (dataEntry == null) {
@@ -217,7 +221,7 @@ public class MetaDataFileSystem extends FileSystem {
   @Override
   public FSDataOutputStream create(Path f, FsPermission permission, boolean overwrite, int bufferSize,
       short replication, long blockSize, Progressable progress) throws IOException {
-    try {
+    try (TimerCloseable time = TimerUtil.time(LOGGER, "create", f.toString())) {
       MetaEntry metaEntry = getMetaEntry(f);
       Path metaPath = metaEntry.getMetaPath();
       Path dataPath = createDataPath(metaPath);
@@ -274,7 +278,7 @@ public class MetaDataFileSystem extends FileSystem {
 
   @Override
   public FileStatus[] listStatus(Path f) throws FileNotFoundException, IOException {
-    try {
+    try (TimerCloseable time = TimerUtil.time(LOGGER, "listStatus", f.toString())) {
       MetaEntry metaEntry = getMetaEntry(f);
       Path metaPath = metaEntry.getMetaPath();
       FileSystem metaFs = metaPath.getFileSystem(getConf());
@@ -303,7 +307,7 @@ public class MetaDataFileSystem extends FileSystem {
   public FileStatus getFileStatus(Path f) throws IOException {
     LOGGER.info("getFileStatus {}", f);
     boolean logError = true;
-    try {
+    try (TimerCloseable time = TimerUtil.time(LOGGER, "getFileStatus", f.toString())) {
       MetaEntry metaEntry = getMetaEntry(f);
       Path metaPath = metaEntry.getMetaPath();
       FileSystem metaFs = metaPath.getFileSystem(getConf());
