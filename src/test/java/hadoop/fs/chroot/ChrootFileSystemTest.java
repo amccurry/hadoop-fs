@@ -19,20 +19,32 @@ import org.apache.hadoop.fs.Path;
 import org.junit.Before;
 import org.junit.Test;
 
-public class ChrootFileSystemTest {
+import hadoop.fs.base.GenericFileSystemTest;
+
+public class ChrootFileSystemTest extends GenericFileSystemTest {
 
   private static final String CHROOT_TEST_FS = "chroot.test.fs";
   private File ROOT = new File("./target/tmp/" + getClass().getName());
-  private Configuration _conf;
+  private Configuration _configuration;
   private Path _chrootFsRoot;
   private Path _realChrootPath;
+
+  @Override
+  public Path getRootPath() {
+    return _chrootFsRoot;
+  }
+
+  @Override
+  public Configuration getConfiguration() {
+    return _configuration;
+  }
 
   @Before
   public void setup() throws Exception {
     FileSystem.closeAll();
     String rootPathStr = ROOT.getCanonicalPath();
-    _conf = new Configuration();
-    LocalFileSystem local = FileSystem.getLocal(_conf);
+    _configuration = new Configuration();
+    LocalFileSystem local = FileSystem.getLocal(_configuration);
     Path rootPath = new Path(rootPathStr);
     local.delete(rootPath, true);
     local.mkdirs(rootPath);
@@ -43,10 +55,10 @@ public class ChrootFileSystemTest {
     realPath = local.makeQualified(realPath);
     _chrootFsRoot = new Path("chroot", "test", "/");
     _realChrootPath = new Path(realPath, "chroot");
-    FileSystem fileSystem = _realChrootPath.getFileSystem(_conf);
+    FileSystem fileSystem = _realChrootPath.getFileSystem(_configuration);
     fileSystem.mkdirs(_realChrootPath);
 
-    _conf.set(CHROOT_TEST_FS, _realChrootPath.toString());
+    _configuration.set(CHROOT_TEST_FS, _realChrootPath.toString());
     assertEmptyDir(_chrootFsRoot);
   }
 
@@ -55,7 +67,7 @@ public class ChrootFileSystemTest {
     Path file = new Path(_chrootFsRoot, UUID.randomUUID()
                                             .toString());
 
-    FileSystem fileSystem = file.getFileSystem(_conf);
+    FileSystem fileSystem = file.getFileSystem(_configuration);
 
     assertFalse(fileSystem.exists(file));
 
@@ -85,7 +97,7 @@ public class ChrootFileSystemTest {
     touchFile(file);
     assertFileExists(file);
 
-    FileSystem fileSystem = file.getFileSystem(_conf);
+    FileSystem fileSystem = file.getFileSystem(_configuration);
     FileStatus[] listStatus = fileSystem.listStatus(file);
     assertEquals(1, listStatus.length);
     assertEquals(file, listStatus[0].getPath());
@@ -95,7 +107,7 @@ public class ChrootFileSystemTest {
   public void testFileNotFoundError() throws IOException {
     Path file = new Path(_chrootFsRoot, UUID.randomUUID()
                                             .toString());
-    FileSystem fileSystem = file.getFileSystem(_conf);
+    FileSystem fileSystem = file.getFileSystem(_configuration);
     try {
       fileSystem.getFileStatus(file);
       fail();
@@ -108,21 +120,4 @@ public class ChrootFileSystemTest {
     }
   }
 
-  private void assertFileExists(Path path) throws IOException {
-    FileStatus fileStatus = path.getFileSystem(_conf)
-                                .getFileStatus(path);
-    assertTrue(fileStatus.isFile());
-  }
-
-  private void touchFile(Path path) throws IOException {
-    path.getFileSystem(_conf)
-        .create(path)
-        .close();
-  }
-
-  private void assertEmptyDir(Path path) throws IOException {
-    FileSystem fileSystem = path.getFileSystem(_conf);
-    assertTrue(fileSystem.exists(path));
-    assertEquals(0, fileSystem.listStatus(path).length);
-  }
 }

@@ -128,8 +128,8 @@ public class MetaDataFileSystemIOTest {
     assertEquals(0, fileSystem.getFileStatus(link)
                               .getLen());
 
-    fileSystem.setXAttr(link, "metadata.file.link", path.toString()
-                                                        .getBytes());
+    fileSystem.setXAttr(link, "trusted.file.link", path.toString()
+                                                       .getBytes());
 
     assertEquals(8, fileSystem.getFileStatus(link)
                               .getLen());

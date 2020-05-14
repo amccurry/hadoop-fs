@@ -453,6 +453,45 @@ public class MetaDataFileSystem extends FileSystem {
   }
 
   @Override
+  public void setPermission(Path p, FsPermission permission) throws IOException {
+    try {
+      MetaEntry metaEntry = getMetaEntry(p);
+      Path metaPath = metaEntry.getMetaPath();
+      FileSystem metaFs = metaPath.getFileSystem(getConf());
+      metaFs.setPermission(metaPath, permission);
+    } catch (Throwable t) {
+      LOGGER.error(t.getMessage(), t);
+      throw t;
+    }
+  }
+
+  @Override
+  public void setOwner(Path p, String username, String groupname) throws IOException {
+    try {
+      MetaEntry metaEntry = getMetaEntry(p);
+      Path metaPath = metaEntry.getMetaPath();
+      FileSystem metaFs = metaPath.getFileSystem(getConf());
+      metaFs.setOwner(metaPath, username, groupname);
+    } catch (Throwable t) {
+      LOGGER.error(t.getMessage(), t);
+      throw t;
+    }
+  }
+
+  @Override
+  public void setAcl(Path path, List<AclEntry> aclSpec) throws IOException {
+    try {
+      MetaEntry metaEntry = getMetaEntry(path);
+      Path metaPath = metaEntry.getMetaPath();
+      FileSystem metaFs = metaPath.getFileSystem(getConf());
+      metaFs.setAcl(metaPath, aclSpec);
+    } catch (Throwable t) {
+      LOGGER.error(t.getMessage(), t);
+      throw t;
+    }
+  }
+
+  @Override
   public void setWorkingDirectory(Path new_dir) {
     _workingDir = new_dir;
   }
@@ -576,7 +615,7 @@ public class MetaDataFileSystem extends FileSystem {
   }
 
   private boolean isFileLinkXAttrName(String name) {
-    return name.equals(getScheme() + ".file.link");
+    return name.equals("trusted.file.link");
   }
 
   private static String digits(long val, int digits) {

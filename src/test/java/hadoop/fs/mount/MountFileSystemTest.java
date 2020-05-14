@@ -19,7 +19,9 @@ import org.apache.hadoop.fs.Path;
 import org.junit.Before;
 import org.junit.Test;
 
-public class MountFileSystemTest {
+import hadoop.fs.base.GenericFileSystemTest;
+
+public class MountFileSystemTest extends GenericFileSystemTest {
 
   private static final String MOUNT_TEST_DEFAULT_MOUNT = "mount.test.default.mount";
   private static final String MOUNT_TEST_AUTOMATIC_UPDATES_DISABLED = "mount.test.automatic.updates.disabled";
@@ -31,6 +33,16 @@ public class MountFileSystemTest {
   private Path _mountFsRoot;
   private Path _mountDir;
   private Path _realDirPath;
+
+  @Override
+  public Path getRootPath() {
+    return _mountFsRoot;
+  }
+
+  @Override
+  public Configuration getConfiguration() {
+    return _conf;
+  }
 
   @Before
   public void setup() throws Exception {
@@ -123,31 +135,4 @@ public class MountFileSystemTest {
     }
   }
 
-  private void assertIsFile(Path path) throws IOException {
-    FileStatus fileStatus = path.getFileSystem(_conf)
-                                .getFileStatus(path);
-    assertTrue(fileStatus.isFile());
-  }
-
-  private void touchFile(Path path) throws IOException {
-    path.getFileSystem(_conf)
-        .create(path)
-        .close();
-  }
-
-  private void mkdir(Path path) throws IOException {
-    path.getFileSystem(_conf)
-        .mkdirs(path);
-  }
-
-  private void assertDoesNotExist(Path path) throws IOException {
-    FileSystem fileSystem = path.getFileSystem(_conf);
-    assertFalse(fileSystem.exists(path));
-  }
-
-  private void assertEmptyDir(Path path) throws IOException {
-    FileSystem fileSystem = path.getFileSystem(_conf);
-    assertTrue(fileSystem.exists(path));
-    assertEquals(0, fileSystem.listStatus(path).length);
-  }
 }

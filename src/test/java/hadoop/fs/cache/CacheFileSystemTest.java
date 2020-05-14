@@ -19,7 +19,9 @@ import org.apache.hadoop.fs.Path;
 import org.junit.Before;
 import org.junit.Test;
 
-public class CacheFileSystemTest {
+import hadoop.fs.base.GenericFileSystemTest;
+
+public class CacheFileSystemTest extends GenericFileSystemTest {
 
   private static final String CACHE_TEST_FS = "cache.test.fs";
   private File ROOT = new File("./target/tmp/" + getClass().getName());
@@ -48,6 +50,16 @@ public class CacheFileSystemTest {
 
     _conf.set(CACHE_TEST_FS, _realPath.toString());
     assertEmptyDir(_cacheFsRoot);
+  }
+
+  @Override
+  protected Path getRootPath() {
+    return _cacheFsRoot;
+  }
+
+  @Override
+  protected Configuration getConfiguration() {
+    return _conf;
   }
 
   @Test
@@ -106,24 +118,6 @@ public class CacheFileSystemTest {
         fail();
       }
     }
-  }
-
-  private void assertFileExists(Path path) throws IOException {
-    FileStatus fileStatus = path.getFileSystem(_conf)
-                                .getFileStatus(path);
-    assertTrue(fileStatus.isFile());
-  }
-
-  private void touchFile(Path path) throws IOException {
-    path.getFileSystem(_conf)
-        .create(path)
-        .close();
-  }
-
-  private void assertEmptyDir(Path path) throws IOException {
-    FileSystem fileSystem = path.getFileSystem(_conf);
-    assertTrue(fileSystem.exists(path));
-    assertEquals(0, fileSystem.listStatus(path).length);
   }
 
 }
