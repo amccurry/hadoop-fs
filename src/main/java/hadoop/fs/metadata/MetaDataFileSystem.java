@@ -213,7 +213,9 @@ public class MetaDataFileSystem extends FileSystem {
       }
       return dataFs.open(dataPath);
     } catch (Throwable t) {
-      LOGGER.error(t.getMessage(), t);
+      if (LOGGER.isDebugEnabled()) {
+        LOGGER.error(t.getMessage(), t);
+      }
       throw t;
     }
   }
@@ -228,7 +230,9 @@ public class MetaDataFileSystem extends FileSystem {
       storeDataPath(metaPath, dataPath, permission, overwrite);
       return createDataOutputStream(dataPath, bufferSize, progress);
     } catch (Throwable t) {
-      LOGGER.error(t.getMessage(), t);
+      if (LOGGER.isDebugEnabled()) {
+        LOGGER.error(t.getMessage(), t);
+      }
       throw t;
     }
   }
@@ -254,7 +258,9 @@ public class MetaDataFileSystem extends FileSystem {
       }
       return srcmetaFs.rename(metaSrcPath, metaDstPath);
     } catch (Throwable t) {
-      LOGGER.error(t.getMessage(), t);
+      if (LOGGER.isDebugEnabled()) {
+        LOGGER.error(t.getMessage(), t);
+      }
       throw t;
     }
   }
@@ -271,7 +277,9 @@ public class MetaDataFileSystem extends FileSystem {
         return deleteFile(metaFs, metaPath);
       }
     } catch (Throwable t) {
-      LOGGER.error(t.getMessage(), t);
+      if (LOGGER.isDebugEnabled()) {
+        LOGGER.error(t.getMessage(), t);
+      }
       throw t;
     }
   }
@@ -285,7 +293,9 @@ public class MetaDataFileSystem extends FileSystem {
       FileStatus[] listStatus = metaFs.listStatus(metaPath);
       return fixFileStatusList(listStatus);
     } catch (Throwable t) {
-      LOGGER.error(t.getMessage(), t);
+      if (LOGGER.isDebugEnabled()) {
+        LOGGER.error(t.getMessage(), t);
+      }
       throw t;
     }
   }
@@ -298,7 +308,9 @@ public class MetaDataFileSystem extends FileSystem {
       FileSystem metaFs = metaPath.getFileSystem(getConf());
       return metaFs.mkdirs(metaPath, permission);
     } catch (Throwable t) {
-      LOGGER.error(t.getMessage(), t);
+      if (LOGGER.isDebugEnabled()) {
+        LOGGER.error(t.getMessage(), t);
+      }
       throw t;
     }
   }
@@ -328,7 +340,9 @@ public class MetaDataFileSystem extends FileSystem {
       return fileStatus;
     } catch (Throwable t) {
       if (logError) {
-        LOGGER.error(t.getMessage(), t);
+        if (LOGGER.isDebugEnabled()) {
+          LOGGER.error(t.getMessage(), t);
+        }
       }
       throw t;
     }
@@ -342,7 +356,9 @@ public class MetaDataFileSystem extends FileSystem {
       FileSystem metaFs = metaPath.getFileSystem(getConf());
       return metaFs.getAclStatus(metaPath);
     } catch (Throwable t) {
-      LOGGER.error(t.getMessage(), t);
+      if (LOGGER.isDebugEnabled()) {
+        LOGGER.error(t.getMessage(), t);
+      }
       throw t;
     }
   }
@@ -355,7 +371,9 @@ public class MetaDataFileSystem extends FileSystem {
       FileSystem metaFs = metaPath.getFileSystem(getConf());
       metaFs.modifyAclEntries(metaPath, aclSpec);
     } catch (Throwable t) {
-      LOGGER.error(t.getMessage(), t);
+      if (LOGGER.isDebugEnabled()) {
+        LOGGER.error(t.getMessage(), t);
+      }
       throw t;
     }
   }
@@ -372,7 +390,9 @@ public class MetaDataFileSystem extends FileSystem {
         metaFs.setXAttr(metaPath, name, value, flag);
       }
     } catch (Throwable t) {
-      LOGGER.error(t.getMessage(), t);
+      if (LOGGER.isDebugEnabled()) {
+        LOGGER.error(t.getMessage(), t);
+      }
       throw t;
     }
   }
@@ -385,7 +405,9 @@ public class MetaDataFileSystem extends FileSystem {
       FileSystem metaFs = metaPath.getFileSystem(getConf());
       return metaFs.getXAttr(metaPath, name);
     } catch (Throwable t) {
-      LOGGER.error(t.getMessage(), t);
+      if (LOGGER.isDebugEnabled()) {
+        LOGGER.error(t.getMessage(), t);
+      }
       throw t;
     }
   }
@@ -398,7 +420,9 @@ public class MetaDataFileSystem extends FileSystem {
       FileSystem metaFs = metaPath.getFileSystem(getConf());
       return metaFs.getXAttrs(metaPath);
     } catch (Throwable t) {
-      LOGGER.error(t.getMessage(), t);
+      if (LOGGER.isDebugEnabled()) {
+        LOGGER.error(t.getMessage(), t);
+      }
       throw t;
     }
   }
@@ -411,7 +435,9 @@ public class MetaDataFileSystem extends FileSystem {
       FileSystem metaFs = metaPath.getFileSystem(getConf());
       return metaFs.getXAttrs(metaPath, names);
     } catch (Throwable t) {
-      LOGGER.error(t.getMessage(), t);
+      if (LOGGER.isDebugEnabled()) {
+        LOGGER.error(t.getMessage(), t);
+      }
       throw t;
     }
   }
@@ -424,7 +450,9 @@ public class MetaDataFileSystem extends FileSystem {
       FileSystem metaFs = metaPath.getFileSystem(getConf());
       return metaFs.listXAttrs(metaPath);
     } catch (Throwable t) {
-      LOGGER.error(t.getMessage(), t);
+      if (LOGGER.isDebugEnabled()) {
+        LOGGER.error(t.getMessage(), t);
+      }
       throw t;
     }
   }
@@ -437,7 +465,9 @@ public class MetaDataFileSystem extends FileSystem {
       FileSystem metaFs = metaPath.getFileSystem(getConf());
       metaFs.removeXAttr(metaPath, name);
     } catch (Throwable t) {
-      LOGGER.error(t.getMessage(), t);
+      if (LOGGER.isDebugEnabled()) {
+        LOGGER.error(t.getMessage(), t);
+      }
       throw t;
     }
   }
@@ -460,7 +490,9 @@ public class MetaDataFileSystem extends FileSystem {
       FileSystem metaFs = metaPath.getFileSystem(getConf());
       metaFs.setPermission(metaPath, permission);
     } catch (Throwable t) {
-      LOGGER.error(t.getMessage(), t);
+      if (LOGGER.isDebugEnabled()) {
+        LOGGER.error(t.getMessage(), t);
+      }
       throw t;
     }
   }
@@ -473,7 +505,9 @@ public class MetaDataFileSystem extends FileSystem {
       FileSystem metaFs = metaPath.getFileSystem(getConf());
       metaFs.setOwner(metaPath, username, groupname);
     } catch (Throwable t) {
-      LOGGER.error(t.getMessage(), t);
+      if (LOGGER.isDebugEnabled()) {
+        LOGGER.error(t.getMessage(), t);
+      }
       throw t;
     }
   }
@@ -486,7 +520,9 @@ public class MetaDataFileSystem extends FileSystem {
       FileSystem metaFs = metaPath.getFileSystem(getConf());
       metaFs.setAcl(metaPath, aclSpec);
     } catch (Throwable t) {
-      LOGGER.error(t.getMessage(), t);
+      if (LOGGER.isDebugEnabled()) {
+        LOGGER.error(t.getMessage(), t);
+      }
       throw t;
     }
   }

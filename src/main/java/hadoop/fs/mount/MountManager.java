@@ -59,6 +59,7 @@ public class MountManager {
   private final Configuration _conf;
   private final MountPathRewrite _defaultMount;
   private final MountFactory _mountFactory;
+  private final XAttrMountFactory _xAttrMountFactory;
 
   private MountManager(Configuration conf, String configPrefix, Path rootVirtualPath) throws IOException {
     _timer = new Timer(MOUNT_RELOAD + configPrefix, true);
@@ -85,24 +86,47 @@ public class MountManager {
     } else {
       _mountPath = null;
     }
+
+    _xAttrMountFactory = new XAttrMountFactory(_defaultMount);
+    _xAttrMountFactory.setConf(_conf);
+    _xAttrMountFactory.initialize();
   }
 
-  public Mount getMount(Path path) {
-    MountKey mountKey = MountKey.create(path);
-    Mount mount = findMountFromInMemoryMounts(mountKey);
-    if (mount == null) {
-      mount = findMountFromFileMounts(mountKey);
+  public Mount getMount(Path path) throws IOException {
+    try {
+      MountKey mountKey = MountKey.create(path);
+      Mount mount = findMountFromInMemoryMounts(mountKey);
       if (mount == null) {
-        mount = findMountFromFactory(mountKey);
+        mount = findMountFromFileMounts(mountKey);
         if (mount == null) {
-          mount = _defaultMount;
+          mount = findMountFromFactory(mountKey);
+          if (mount == null) {
+            mount = findMountFromXAttr(mountKey);
+            if (mount == null) {
+              mount = _defaultMount;
+            }
+          }
         }
       }
+      return mount;
+    } catch (Exception e) {
+      LOGGER.error("Unknown error {}", e.getClass());
+      LOGGER.error("Unknown error", e);
+      return _defaultMount;
     }
-    return mount;
   }
 
-  private Mount findMountFromFactory(MountKey mountKey) {
+  private Mount findMountFromXAttr(MountKey mountKey) throws IOException {
+    do {
+      Mount mount = _xAttrMountFactory.findMount(mountKey);
+      if (mount != null) {
+        return mount;
+      }
+    } while ((mountKey = mountKey.getParentKey()) != null);
+    return null;
+  }
+
+  private Mount findMountFromFactory(MountKey mountKey) throws IOException {
     do {
       Mount mount = _mountFactory.findMount(mountKey);
       if (mount != null) {
@@ -120,10 +144,11 @@ public class MountManager {
     return findMount(_mounts, mountKey);
   }
 
-  public void addMount(Path realPath, Path virtualPath, boolean persistant) throws IOException {
+  public void addMount(Path realPath, Path virtualPath, boolean persistent) throws IOException {
+    LOGGER.info("Adding mount from {} to {} persistent {}", realPath, virtualPath, persistent);
     MountPathRewrite mountPathRewrite = new MountPathRewrite(realPath, virtualPath);
     _mounts.put(mountPathRewrite.getMountKey(), mountPathRewrite);
-    if (persistant) {
+    if (persistent) {
       MountEntry mountEntry = MountEntry.builder()
                                         .realPath(realPath.toString())
                                         .virtualPath(virtualPath.toString())
@@ -132,13 +157,16 @@ public class MountManager {
       FileSystem fileSystem = _mountPath.getFileSystem(_conf);
       Path newFile = new Path("/tmp/" + UUID.randomUUID()
                                             .toString());
+
       try (PrintWriter pw = new PrintWriter(fileSystem.create(newFile))) {
-        try (BufferedReader reader = new BufferedReader(new InputStreamReader(fileSystem.open(_mountPath)))) {
-          String line;
-          while ((line = reader.readLine()) != null) {
-            line = line.trim();
-            if (!line.isEmpty()) {
-              pw.println(line);
+        if (fileSystem.exists(_mountPath)) {
+          try (BufferedReader reader = new BufferedReader(new InputStreamReader(fileSystem.open(_mountPath)))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+              line = line.trim();
+              if (!line.isEmpty()) {
+                pw.println(line);
+              }
             }
           }
         }
@@ -148,12 +176,19 @@ public class MountManager {
       // Backup existing file to old file. Then try to prompt new file. If
       // successful then delete old file, if not then put old file back and
       // delete the new file.
-      Path oldFile = new Path(_mountPath.getParent(), _mountPath.getName() + ".old." + now());
-      if (fileSystem.rename(_mountPath, oldFile)) {
+      if (fileSystem.exists(_mountPath)) {
+        Path oldFile = new Path(_mountPath.getParent(), _mountPath.getName() + ".old." + now());
+        if (fileSystem.rename(_mountPath, oldFile)) {
+          if (fileSystem.rename(newFile, _mountPath)) {
+            LOGGER.info("New mount added {}", mountEntry);
+            fileSystem.delete(oldFile, false);
+          } else {
+            fileSystem.rename(oldFile, newFile);
+          }
+        }
+      } else {
         if (fileSystem.rename(newFile, _mountPath)) {
-          fileSystem.delete(oldFile, false);
-        } else {
-          fileSystem.rename(oldFile, newFile);
+          LOGGER.info("New mount added {}", mountEntry);
         }
       }
     }
@@ -163,6 +198,8 @@ public class MountManager {
     FileSystem fileSystem = _mountPath.getFileSystem(_conf);
     if (fileSystem.exists(_mountPath)) {
       loadCache(fileSystem);
+    } else {
+      _reloadingMountsRef.set(new ConcurrentHashMap<>());
     }
   }
 
@@ -182,6 +219,9 @@ public class MountManager {
   private ConcurrentMap<MountKey, MountPathRewrite> loadFromFile() throws IOException {
     ConcurrentMap<MountKey, MountPathRewrite> mounts = new ConcurrentHashMap<>();
     FileSystem fileSystem = _mountPath.getFileSystem(_conf);
+    if (!fileSystem.exists(_mountPath)) {
+      return mounts;
+    }
     try (BufferedReader reader = new BufferedReader(new InputStreamReader(fileSystem.open(_mountPath)))) {
       String line;
       while ((line = reader.readLine()) != null) {
@@ -196,12 +236,14 @@ public class MountManager {
 
   private void parseLine(ConcurrentMap<MountKey, MountPathRewrite> mounts, String line) throws IOException {
     MountEntry mountEntry = OBJECT_MAPPER.readValue(line, MountEntry.class);
-    MountPathRewrite mountPathRewrite = new MountPathRewrite(mountEntry.getRealPath(), mountEntry.getVirtualPath());
+    MountPathRewrite mountPathRewrite = new MountPathRewrite(new Path(mountEntry.getRealPath()),
+        new Path(mountEntry.getVirtualPath()));
     mounts.put(mountPathRewrite.getMountKey(), mountPathRewrite);
   }
 
   private Mount findMount(Map<MountKey, MountPathRewrite> mounts, MountKey mountKey) {
     do {
+      LOGGER.info("mountkey {} current mountkeys {}", mountKey, mounts.keySet());
       Mount mount = mounts.get(mountKey);
       if (mount != null) {
         return mount;

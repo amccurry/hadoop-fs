@@ -2,10 +2,12 @@ package hadoop.fs.mount;
 
 import java.io.IOException;
 import java.net.URI;
+import java.util.EnumSet;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.fs.XAttrSetFlag;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -71,9 +73,10 @@ public class MountFileSystem extends ContextFileSystem {
   protected PathContext getPathContext(Path f) throws IOException {
     try (TimerCloseable time = TimerUtil.time(LOGGER, "getPathContext", f.toString())) {
       Path originalPath = makeQualified(f);
-      Mount mount = getMount(f);
+      Mount mount = getMount(originalPath);
+      LOGGER.info("path {} mount {}", f, mount);
       Path mountPath = mount.toMountPath(originalPath);
-
+      LOGGER.info("original path {} to mount path {}", originalPath, mountPath);
       return new PathContext() {
 
         @Override
@@ -108,8 +111,17 @@ public class MountFileSystem extends ContextFileSystem {
     throw new IOException("Not Implemented");
   }
 
-  private Mount getMount(Path path) {
-    return _mountManager.getMount(makeQualified(path));
+  @Override
+  public void setXAttr(Path p, String name, byte[] value, EnumSet<XAttrSetFlag> flag) throws IOException {
+    if (name.equals("trusted.mount")) {
+      _mountManager.addMount(new Path(new String(value)), p, true);
+    } else {
+      super.setXAttr(p, name, value, flag);
+    }
+  }
+
+  private Mount getMount(Path path) throws IOException {
+    return _mountManager.getMount(path);
   }
 
   private Path getRootPath() {

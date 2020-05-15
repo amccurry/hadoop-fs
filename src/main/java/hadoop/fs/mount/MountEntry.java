@@ -1,7 +1,5 @@
 package hadoop.fs.mount;
 
-import org.apache.hadoop.fs.Path;
-
 import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -20,11 +18,4 @@ public class MountEntry {
 
   String virtualPath;
 
-  public Path getRealPath() {
-    return new Path(realPath);
-  }
-
-  public Path getVirtualPath() {
-    return new Path(virtualPath);
-  }
 }
