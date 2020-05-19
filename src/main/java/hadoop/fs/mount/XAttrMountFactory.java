@@ -5,6 +5,7 @@ import java.io.IOException;
 import java.security.PrivilegedExceptionAction;
 import java.util.Map;
 
+import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.conf.Configured;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
@@ -18,19 +19,32 @@ public class XAttrMountFactory extends Configured implements MountFactory {
 
   private static final Logger LOGGER = LoggerFactory.getLogger(XAttrMountFactory.class);
 
-  private static final String TRUSTED_DIR_LINK = "trusted.dir.link";
+  public static final String XATTR_HADOOP_AUTHENTICATION_KERBEROS_PRINCIPAL = "xattr.hadoop.authentication.kerberos.principal";
+  public static final String XATTR_HADOOP_AUTHENTICATION_KERBEROS_KEYTAB = "xattr.hadoop.authentication.kerberos.keytab";
+  public static final String HDFS = "hdfs";
+  public static final String TRUSTED_DIR_LINK = "trusted.dir.link";
 
   private final Mount _defaultMount;
+
   private UserGroupInformation _superUserUgi;
 
-  public XAttrMountFactory(Mount defaultMount) {
+  public XAttrMountFactory(Mount defaultMount) throws IOException {
     _defaultMount = defaultMount;
   }
 
   @Override
-  public void initialize() {
-    // need to make generic with kerberos support
-    _superUserUgi = UserGroupInformation.createRemoteUser("hdfs");
+  public void initialize() throws IOException {
+    _superUserUgi = getUserGroupInformation(getConf());
+  }
+
+  public static UserGroupInformation getUserGroupInformation(Configuration configuration) throws IOException {
+    String principal = configuration.get(XATTR_HADOOP_AUTHENTICATION_KERBEROS_PRINCIPAL);
+    if (principal == null) {
+      return UserGroupInformation.createRemoteUser(HDFS);
+    } else {
+      String keytab = configuration.get(XATTR_HADOOP_AUTHENTICATION_KERBEROS_KEYTAB);
+      return UserGroupInformation.loginUserFromKeytabAndReturnUGI(principal, keytab);
+    }
   }
 
   @Override
@@ -44,9 +58,8 @@ public class XAttrMountFactory extends Configured implements MountFactory {
     LOGGER.info("Check mount from mount path {}", path);
     Path mountPath = _defaultMount.toMountPath(path);
     LOGGER.info("Mount path {}", mountPath);
-    FileSystem fileSystem = mountPath.getFileSystem(getConf());
     try {
-      return getMountFromPath(path, mountPath, fileSystem);
+      return getMountFromPath(_superUserUgi, path, mountPath, getConf());
     } catch (FileNotFoundException | UnsupportedOperationException e) {
       LOGGER.error("Unknown error {}", e.getClass());
       return null;
@@ -56,9 +69,11 @@ public class XAttrMountFactory extends Configured implements MountFactory {
     }
   }
 
-  private Mount getMountFromPath(Path path, Path mountPath, FileSystem fileSystem)
+  public static Mount getMountFromPath(UserGroupInformation ugi, Path path, Path mountPath, Configuration configuration)
       throws IOException, InterruptedException {
-    return _superUserUgi.doAs((PrivilegedExceptionAction<Mount>) () -> {
+    ugi.checkTGTAndReloginFromKeytab();
+    return ugi.doAs((PrivilegedExceptionAction<Mount>) () -> {
+      FileSystem fileSystem = mountPath.getFileSystem(configuration);
       Map<String, byte[]> xAttrs = fileSystem.getXAttrs(mountPath);
       byte[] bs = xAttrs.get(TRUSTED_DIR_LINK);
       if (bs == null) {
@@ -67,7 +82,6 @@ public class XAttrMountFactory extends Configured implements MountFactory {
       }
       return new MountPathRewrite(new Path(new String(bs)), path);
     });
-
   }
 
   private Path toPath(MountKey mountKey) {

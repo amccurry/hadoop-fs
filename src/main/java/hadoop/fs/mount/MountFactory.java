@@ -8,7 +8,7 @@ public interface MountFactory {
 
   };
 
-  default void initialize() {
+  default void initialize() throws IOException {
 
   }
 

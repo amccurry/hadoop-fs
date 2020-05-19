@@ -12,13 +12,13 @@ import hadoop.fs.base.ContextFileSystem;
 
 public class FSCacheFileSystem extends ContextFileSystem {
 
-  protected final static FSCache FS_CACHE = FSCache.getInstance();
-
-  protected URI _cacheFsUri;
-  protected URI _realFsUri;
+  private FSCache _fsCache;
+  private URI _cacheFsUri;
+  private URI _realFsUri;
 
   @Override
   public void initialize(URI name, Configuration conf) throws IOException {
+    _fsCache = FSCache.getInstance(conf);
     _cacheFsUri = name;
     String pathStr = conf.get(getConfigPrefix() + ".fs");
     Path path = new Path(pathStr);
@@ -42,7 +42,7 @@ public class FSCacheFileSystem extends ContextFileSystem {
     FileSystem contextFileSystem = contextPath.getFileSystem(getConf());
     FSDataInputStream inputStream = contextFileSystem.open(f, bufferSize);
     return new FSDataInputStream(
-        new FSCachedInputStream(FS_CACHE, contextFileSystem.getFileStatus(contextPath), inputStream));
+        new FSCachedInputStream(_fsCache, contextFileSystem.getFileStatus(contextPath), inputStream));
   }
 
   @Override

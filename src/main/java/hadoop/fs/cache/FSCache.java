@@ -4,6 +4,7 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 
+import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FileStatus;
 import org.ehcache.Cache;
@@ -27,12 +28,21 @@ import lombok.Value;
 
 public class FSCache {
 
+  public static final String CACHE_ON_DISK_SIZE_GB_KEY = "cache.on.disk.size.gb";
+  public static final long CACHE_ON_DISK_SIZE_GB_DEFAULT = 10;
+
+  public static final String CACHE_ON_HEAP_SIZE_MB_KEY = "cache.on.heap.size.mb";
+  public static final long CACHE_ON_HEAP_SIZE_MB_DEFAULT = 64;
+
+  public static final String CACHE_ON_DISK_PATH_KEY = "cache.on.disk.path";
+  public static final String CACHE_ON_DISK_PATH_DEFAULT = "/tmp/fscache";
+
   private static final String CACHE_NAME = "fs-cache";
   private static FSCache FS_CACHE;
 
-  public synchronized static FSCache getInstance() {
+  public synchronized static FSCache getInstance(Configuration configuration) {
     if (FS_CACHE == null) {
-      FS_CACHE = new FSCache();
+      FS_CACHE = new FSCache(configuration);
     }
     return FS_CACHE;
   }
@@ -40,18 +50,16 @@ public class FSCache {
   private final Cache<FileBlockCacheKey, byte[]> _cache;
   private final int _blockSize = 5 * 1024 * 1024;
 
-  private FSCache() {
-    File cacheDir = new File("./cache");
-    ResourcePoolsBuilder disk = ResourcePoolsBuilder.newResourcePoolsBuilder()
-                                                    .heap(256, MemoryUnit.MB)
-                                                    .disk(20, MemoryUnit.GB, true);
+  private FSCache(Configuration configuration) {
+    File cacheDir = getCacheDir(configuration);
+    ResourcePoolsBuilder resourcePoolsBuilder = getResourcePoolsBuilder(configuration);
 
-    CacheConfigurationBuilder<FileBlockCacheKey, byte[]> builder = CacheConfigurationBuilder.newCacheConfigurationBuilder(
-        FileBlockCacheKey.class, byte[].class, disk);
+    CacheConfigurationBuilder<FileBlockCacheKey, byte[]> cacheConfigurationBuilder = CacheConfigurationBuilder.newCacheConfigurationBuilder(
+        FileBlockCacheKey.class, byte[].class, resourcePoolsBuilder);
 
     PersistentCacheManager cacheManager = CacheManagerBuilder.newCacheManagerBuilder()
                                                              .with(CacheManagerBuilder.persistence(cacheDir))
-                                                             .withCache(CACHE_NAME, builder)
+                                                             .withCache(CACHE_NAME, cacheConfigurationBuilder)
                                                              .withSerializer(FileBlockCacheKey.class,
                                                                  FileBlockCacheKeySerializer.class)
                                                              .build(true);
@@ -59,6 +67,34 @@ public class FSCache {
     _cache = cacheManager.getCache(CACHE_NAME, FileBlockCacheKey.class, byte[].class);
     Runtime.getRuntime()
            .addShutdownHook(new Thread(() -> cacheManager.close()));
+  }
+
+  private ResourcePoolsBuilder getResourcePoolsBuilder(Configuration configuration) {
+    long onHeapSize = getOnHeapCacheSize(configuration);
+    long onDiskSize = getOnDiskCacheSize(configuration);
+    ResourcePoolsBuilder resourcePoolsBuilder = ResourcePoolsBuilder.newResourcePoolsBuilder();
+    if (onHeapSize > 0) {
+      resourcePoolsBuilder = resourcePoolsBuilder.heap(onHeapSize, MemoryUnit.MB);
+    }
+    if (onDiskSize > 0) {
+      resourcePoolsBuilder = resourcePoolsBuilder.disk(onDiskSize, MemoryUnit.GB, true);
+    }
+    return resourcePoolsBuilder;
+  }
+
+  private long getOnDiskCacheSize(Configuration configuration) {
+    return configuration.getLong(CACHE_ON_DISK_SIZE_GB_KEY, CACHE_ON_DISK_SIZE_GB_DEFAULT);
+  }
+
+  private long getOnHeapCacheSize(Configuration configuration) {
+    return configuration.getLong(CACHE_ON_HEAP_SIZE_MB_KEY, CACHE_ON_HEAP_SIZE_MB_DEFAULT);
+  }
+
+  private File getCacheDir(Configuration configuration) {
+    String dirStr = configuration.get(CACHE_ON_DISK_PATH_KEY, CACHE_ON_DISK_PATH_DEFAULT);
+    File dir = new File(dirStr);
+    dir.mkdirs();
+    return dir;
   }
 
   public int read(FileStatus fileStatus, FSDataInputStream input, byte[] b, int off, int len) throws IOException {
