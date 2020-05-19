@@ -1,4 +1,5 @@
 hadoop.fs.metadata.MetaDataFileSystem
 hadoop.fs.mount.MountFileSystem
 hadoop.fs.chroot.ChrootFileSystem
-hadoop.fs.cache.CacheFileSystem
+hadoop.fs.cache.FSCacheFileSystem
+hadoop.fs.cache.S3AFSCacheFileSystem
